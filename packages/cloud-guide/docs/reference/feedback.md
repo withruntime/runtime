@@ -52,8 +52,8 @@ result = runtime.feedback.create(kind="bug", summary="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.feedback.create(kind: "bug", summary: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.feedback.create(kind: "bug", summary: "example")
 ```
 
 ```bash title="CLI"

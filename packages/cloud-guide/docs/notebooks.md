@@ -8,7 +8,7 @@ A machine running JupyterLab on port 8888 over /workspace, with NumPy, pandas an
 | --- | --- |
 | vCPUs | 2 |
 | Memory | 4 GB |
-| Disk | 4 GB |
+| Disk | 4 GB, or its image's size when larger |
 | Image | `runtime/notebooks` |
 | Pauses when idle | After 300 seconds |
 

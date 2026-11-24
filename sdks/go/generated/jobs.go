@@ -46,11 +46,11 @@ type JobSettings struct {
 	Retry *JobRetry `json:"retry,omitempty"`
 	// Secrets Which of its org's secrets each run gets; every one whose scope admits it when omitted.
 	Secrets *JobSecrets `json:"secrets,omitempty"`
-	// Vcpu Each run's vCPUs. At least 1. Default: 1.
+	// Vcpu Each run's vCPUs; a job's default (1) when omitted. At least 1.
 	Vcpu *int64 `json:"vcpu,omitempty"`
-	// MemoryGb Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1.
+	// MemoryGb Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1.
 	MemoryGb *float64 `json:"memoryGB,omitempty"`
-	// DiskGb Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4.
+	// DiskGb Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1.
 	DiskGb *float64 `json:"diskGB,omitempty"`
 	// Image The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
 	Image *string `json:"image,omitempty"`
@@ -110,6 +110,25 @@ type JobInfo struct {
 	DeletedAt *string `json:"deletedAt,omitempty"`
 }
 
+// JobGetQuery is what Get takes in its query.
+type JobGetQuery struct {
+	// Wait Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60.
+	Wait *float64
+	// IfState The state the caller last read, which `wait` waits for it to leave.
+	IfState *string
+}
+
+func (q JobGetQuery) values() url.Values {
+	v := url.Values{}
+	if q.Wait != nil {
+		v.Set("wait", strconv.FormatFloat(*q.Wait, 'f', -1, 64))
+	}
+	if q.IfState != nil {
+		v.Set("ifState", *q.IfState)
+	}
+	return v
+}
+
 // JobListQuery is what List takes in its query.
 type JobListQuery struct {
 	// Label Only those with every label given (repeat it for several): key:value, or a key for any value.
@@ -149,9 +168,9 @@ func (c *Jobs) Create(ctx context.Context, in JobCreate, opts *RequestOptions) (
 }
 
 // Get Returns a job.
-func (c *Jobs) Get(ctx context.Context, id string, opts *RequestOptions) (*Job, error) {
+func (c *Jobs) Get(ctx context.Context, id string, q JobGetQuery, opts *RequestOptions) (*Job, error) {
 	out := new(JobInfo)
-	if err := c.t.Do(ctx, "GET", "/v2/jobs/"+url.PathEscape(id), nil, nil, Call{Idempotent: true}, opts, out); err != nil {
+	if err := c.t.Do(ctx, "GET", "/v2/jobs/"+url.PathEscape(id), q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
 	return newJob(c, out), nil
@@ -166,9 +185,9 @@ func (c *Jobs) List(ctx context.Context, q JobListQuery, opts *RequestOptions) (
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Jobs) ListAll(ctx context.Context, q JobListQuery, opts *RequestOptions) iter.Seq2[JobInfo, error] {
-	return all(func(cursor *string) (*Page[JobInfo], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[JobInfo], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
@@ -234,8 +253,12 @@ func newJob(c *Jobs, info *JobInfo) *Job {
 func (s *Job) ID() string { return s.Info.ID }
 
 // Refresh Returns a job.
-func (s *Job) Refresh(ctx context.Context, opts *RequestOptions) error {
-	got, err := s.c.Get(ctx, s.Info.ID, opts)
+func (s *Job) Refresh(ctx context.Context, q *JobGetQuery, opts *RequestOptions) error {
+	var qb JobGetQuery
+	if q != nil {
+		qb = *q
+	}
+	got, err := s.c.Get(ctx, s.Info.ID, qb, opts)
 	if err != nil {
 		return err
 	}

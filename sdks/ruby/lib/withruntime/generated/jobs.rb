@@ -6,328 +6,478 @@ require_relative "runtime"
 require_relative "sandboxes"
 
 module Withruntime
-  module Generated
-    # When a job runs: once, at `at`; or at each time of its `cron` in its `timezone`. One of the two.
-    # - +at+: The one time it runs.
-    # - +cron+: A cron expression of five fields (minute, hour, day of month, month, day of week), as cron reads them, or `@hourly`, `@daily`, `@weekly`, `@monthly` or `@yearly`.
-    # - +timezone+: The IANA timezone its cron's times are in (`America/Denver`), daylight saving included; UTC when omitted.
-    JobSchedule = Struct.new(:at, :cron, :timezone, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # When a job runs: once, at `at`; or at each time of its `cron` in its `timezone`. One of the two.
+  # - +at+: The one time it runs.
+  # - +cron+: A cron expression of five fields (minute, hour, day of month, month, day of week), as cron reads them, or `@hourly`, `@daily`, `@weekly`, `@monthly` or `@yearly`.
+  # - +timezone+: The IANA timezone its cron's times are in (`America/Denver`), daylight saving included; UTC when omitted.
+  JobSchedule = Struct.new(:at, :cron, :timezone, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          at: h["at"],
-          cron: h["cron"],
-          timezone: h["timezone"],
-        )
-      end
-
-      def to_wire
-        {
-          "at" => self.at,
-          "cron" => self.cron,
-          "timezone" => self.timezone,
-        }.compact
-      end
+      new(
+        at: h["at"],
+        cron: h["cron"],
+        timezone: h["timezone"],
+      )
     end
 
-    # How a failed run is run again: a run that ends with an exit code other than 0, or at its timeout.
-    # - +max_attempts+: Attempts in all for one time, the first included; 1 (no retry) when omitted. At least 1. At most 10. Default: 1.
-    # - +backoff_seconds+: Seconds from a failed attempt's end to the next. At least 0. At most 86400. Default: 30.
-    JobRetry = Struct.new(:max_attempts, :backoff_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "at" => self.at,
+        "cron" => self.cron,
+        "timezone" => self.timezone,
+      }.compact
+    end
+  end
 
-        new(
-          max_attempts: h["maxAttempts"],
-          backoff_seconds: h["backoffSeconds"],
-        )
-      end
+  # How a failed run is run again: a run that ends with an exit code other than 0, or at its timeout.
+  # - +max_attempts+: Attempts in all for one time, the first included; 1 (no retry) when omitted. At least 1. At most 10. Default: 1.
+  # - +backoff_seconds+: Seconds from a failed attempt's end to the next. At least 0. At most 86400. Default: 30.
+  JobRetry = Struct.new(:max_attempts, :backoff_seconds, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "maxAttempts" => self.max_attempts,
-          "backoffSeconds" => self.backoff_seconds,
-        }.compact
-      end
+      new(
+        max_attempts: h["maxAttempts"],
+        backoff_seconds: h["backoffSeconds"],
+      )
     end
 
-    # Which of its org's secrets each run gets, and under which variables.
-    # - +only+: The secrets each run gets in their own variables, by name: only those of them whose scope admits it; [] none. At most 64 items.
-    # - +env+: Variables each holding the value of one of the org's visible secrets whose scope admits the run, by the secret's name, `only` or not: `{"WEBSITE_TOKEN": "CRON_SECRET"}`.
-    JobSecrets = Struct.new(:only, :env, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "maxAttempts" => self.max_attempts,
+        "backoffSeconds" => self.backoff_seconds,
+      }.compact
+    end
+  end
 
-        new(
-          only: h["only"],
-          env: h["env"],
-        )
-      end
+  # Which of its org's secrets each run gets, and under which variables.
+  # - +only+: The secrets each run gets in their own variables, by name: only those of them whose scope admits it; [] none. At most 64 items.
+  # - +env+: Variables each holding the value of one of the org's visible secrets whose scope admits the run, by the secret's name, `only` or not: `{"WEBSITE_TOKEN": "CRON_SECRET"}`.
+  JobSecrets = Struct.new(:only, :env, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "only" => self.only,
-          "env" => self.env,
-        }.compact
-      end
+      new(
+        only: h["only"],
+        env: h["env"],
+      )
     end
 
-    # A job's settings: what each of its runs is made with.
-    # - +schedule+: When it runs.
-    # - +run+: The command each run runs; the run ends when it ends.
-    # - +retry+: How a failed run is run again; never when omitted.
-    # - +secrets+: Which of its org's secrets each run gets; every one whose scope admits it when omitted.
-    # - +vcpu+: Each run's vCPUs. At least 1. Default: 1.
-    # - +memory_gb+: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1.
-    # - +disk_gb+: Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4.
-    # - +image+: The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
-    # - +user+: Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
-    # - +volumes+: Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it.
-    # - +max_cost+: The most one run may cost, in US dollars (`"0.50"`): a run pauses once it has cost that, as a machine at its maxCost does.
-    JobSettings = Struct.new(:schedule, :run, :retry, :secrets, :vcpu, :memory_gb, :disk_gb, :image, :user, :volumes, :max_cost, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "only" => self.only,
+        "env" => self.env,
+      }.compact
+    end
+  end
 
-        new(
-          schedule: JobSchedule.from(h["schedule"]),
-          run: SandboxRun.from(h["run"]),
-          retry: JobRetry.from(h["retry"]),
-          secrets: JobSecrets.from(h["secrets"]),
-          vcpu: h["vcpu"],
-          memory_gb: h["memoryGB"],
-          disk_gb: h["diskGB"],
-          image: h["image"],
-          user: h["user"],
-          volumes: h["volumes"]&.map { |i| VolumeMount.from(i) },
-          max_cost: h["maxCost"],
-        )
-      end
+  # A job's settings: what each of its runs is made with.
+  # - +schedule+: When it runs.
+  # - +run+: The command each run runs; the run ends when it ends.
+  # - +retry+: How a failed run is run again; never when omitted.
+  # - +secrets+: Which of its org's secrets each run gets; every one whose scope admits it when omitted.
+  # - +vcpu+: Each run's vCPUs; a job's default (1) when omitted. At least 1.
+  # - +memory_gb+: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1.
+  # - +disk_gb+: Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1.
+  # - +image+: The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
+  # - +user+: Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
+  # - +volumes+: Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it.
+  # - +max_cost+: The most one run may cost, in US dollars (`"0.50"`): a run pauses once it has cost that, as a machine at its maxCost does.
+  JobSettings = Struct.new(:schedule, :run, :retry, :secrets, :vcpu, :memory_gb, :disk_gb, :image, :user, :volumes, :max_cost, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "schedule" => self.schedule&.to_wire,
-          "run" => self.run&.to_wire,
-          "retry" => self.retry&.to_wire,
-          "secrets" => self.secrets&.to_wire,
-          "vcpu" => self.vcpu,
-          "memoryGB" => self.memory_gb,
-          "diskGB" => self.disk_gb,
-          "image" => self.image,
-          "user" => self.user,
-          "volumes" => self.volumes&.map { |i| i&.to_wire },
-          "maxCost" => self.max_cost,
-        }.compact
-      end
+      new(
+        schedule: JobSchedule.from(h["schedule"]),
+        run: SandboxRun.from(h["run"]),
+        retry: JobRetry.from(h["retry"]),
+        secrets: JobSecrets.from(h["secrets"]),
+        vcpu: h["vcpu"],
+        memory_gb: h["memoryGB"],
+        disk_gb: h["diskGB"],
+        image: h["image"],
+        user: h["user"],
+        volumes: h["volumes"]&.map { |i| VolumeMount.from(i) },
+        max_cost: h["maxCost"],
+      )
     end
 
-    # A job to create: its schedule and run are required.
-    # - +schedule+: When it runs.
-    # - +run+: The command each run runs; the run ends when it ends.
-    # - +retry+: How a failed run is run again; never when omitted.
-    # - +secrets+: Which of its org's secrets each run gets; every one whose scope admits it when omitted.
-    # - +vcpu+: Each run's vCPUs. At least 1. Default: 1.
-    # - +memory_gb+: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1.
-    # - +disk_gb+: Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4.
-    # - +image+: The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
-    # - +user+: Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
-    # - +volumes+: Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it.
-    # - +max_cost+: The most one run may cost, in US dollars (`"0.50"`): a run pauses once it has cost that, as a machine at its maxCost does.
-    # - +name+: Its name, unique in its project.
-    # - +labels+: Labels to find it by; each run carries them.
-    JobCreate = Struct.new(:schedule, :run, :retry, :secrets, :vcpu, :memory_gb, :disk_gb, :image, :user, :volumes, :max_cost, :name, :labels, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "schedule" => self.schedule&.to_wire,
+        "run" => self.run&.to_wire,
+        "retry" => self.retry&.to_wire,
+        "secrets" => self.secrets&.to_wire,
+        "vcpu" => self.vcpu,
+        "memoryGB" => self.memory_gb,
+        "diskGB" => self.disk_gb,
+        "image" => self.image,
+        "user" => self.user,
+        "volumes" => self.volumes&.map { |i| i&.to_wire },
+        "maxCost" => self.max_cost,
+      }.compact
+    end
+  end
 
-        new(
-          schedule: JobSchedule.from(h["schedule"]),
-          run: SandboxRun.from(h["run"]),
-          retry: JobRetry.from(h["retry"]),
-          secrets: JobSecrets.from(h["secrets"]),
-          vcpu: h["vcpu"],
-          memory_gb: h["memoryGB"],
-          disk_gb: h["diskGB"],
-          image: h["image"],
-          user: h["user"],
-          volumes: h["volumes"]&.map { |i| VolumeMount.from(i) },
-          max_cost: h["maxCost"],
-          name: h["name"],
-          labels: h["labels"],
-        )
-      end
+  # A job to create: its schedule and run are required.
+  # - +schedule+: When it runs.
+  # - +run+: The command each run runs; the run ends when it ends.
+  # - +retry+: How a failed run is run again; never when omitted.
+  # - +secrets+: Which of its org's secrets each run gets; every one whose scope admits it when omitted.
+  # - +vcpu+: Each run's vCPUs; a job's default (1) when omitted. At least 1.
+  # - +memory_gb+: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1.
+  # - +disk_gb+: Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1.
+  # - +image+: The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
+  # - +user+: Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
+  # - +volumes+: Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it.
+  # - +max_cost+: The most one run may cost, in US dollars (`"0.50"`): a run pauses once it has cost that, as a machine at its maxCost does.
+  # - +name+: Its name, unique in its project.
+  # - +labels+: Labels to find it by; each run carries them.
+  JobCreate = Struct.new(:schedule, :run, :retry, :secrets, :vcpu, :memory_gb, :disk_gb, :image, :user, :volumes, :max_cost, :name, :labels, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "schedule" => self.schedule&.to_wire,
-          "run" => self.run&.to_wire,
-          "retry" => self.retry&.to_wire,
-          "secrets" => self.secrets&.to_wire,
-          "vcpu" => self.vcpu,
-          "memoryGB" => self.memory_gb,
-          "diskGB" => self.disk_gb,
-          "image" => self.image,
-          "user" => self.user,
-          "volumes" => self.volumes&.map { |i| i&.to_wire },
-          "maxCost" => self.max_cost,
-          "name" => self.name,
-          "labels" => self.labels,
-        }.compact
-      end
+      new(
+        schedule: JobSchedule.from(h["schedule"]),
+        run: SandboxRun.from(h["run"]),
+        retry: JobRetry.from(h["retry"]),
+        secrets: JobSecrets.from(h["secrets"]),
+        vcpu: h["vcpu"],
+        memory_gb: h["memoryGB"],
+        disk_gb: h["diskGB"],
+        image: h["image"],
+        user: h["user"],
+        volumes: h["volumes"]&.map { |i| VolumeMount.from(i) },
+        max_cost: h["maxCost"],
+        name: h["name"],
+        labels: h["labels"],
+      )
     end
 
-    # Why a time's run was not made and will not be tried again: the answer its create got. The job waits for its next time; a run made takes it off.
-    # - +at+: The time whose run was not made.
-    # - +status+: The HTTP status its create was answered with.
-    # - +code+: The error's code, as any call's error names it.
-    # - +message+: What went wrong.
-    # - +request_id+: The create's request ID, for support.
-    JobError = Struct.new(:at, :status, :code, :message, :request_id, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "schedule" => self.schedule&.to_wire,
+        "run" => self.run&.to_wire,
+        "retry" => self.retry&.to_wire,
+        "secrets" => self.secrets&.to_wire,
+        "vcpu" => self.vcpu,
+        "memoryGB" => self.memory_gb,
+        "diskGB" => self.disk_gb,
+        "image" => self.image,
+        "user" => self.user,
+        "volumes" => self.volumes&.map { |i| i&.to_wire },
+        "maxCost" => self.max_cost,
+        "name" => self.name,
+        "labels" => self.labels,
+      }.compact
+    end
+  end
 
-        new(
-          at: h["at"],
-          status: h["status"],
-          code: h["code"],
-          message: h["message"],
-          request_id: h["requestId"],
-        )
-      end
+  # Why a time's run was not made and will not be tried again: the answer its create got. The job waits for its next time; a run made takes it off.
+  # - +at+: The time whose run was not made.
+  # - +status+: The HTTP status its create was answered with.
+  # - +code+: The error's code, as any call's error names it.
+  # - +message+: What went wrong.
+  # - +request_id+: The create's request ID, for support.
+  JobError = Struct.new(:at, :status, :code, :message, :request_id, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "at" => self.at,
-          "status" => self.status,
-          "code" => self.code,
-          "message" => self.message,
-          "requestId" => self.request_id,
-        }.compact
-      end
+      new(
+        at: h["at"],
+        status: h["status"],
+        code: h["code"],
+        message: h["message"],
+        request_id: h["requestId"],
+      )
     end
 
-    # A job.
-    # - +schedule+: When it runs.
-    # - +run+: The command each run runs; the run ends when it ends.
-    # - +retry+: How a failed run is run again; never when omitted.
-    # - +secrets+: Which of its org's secrets each run gets; every one whose scope admits it when omitted.
-    # - +vcpu+: Each run's vCPUs. At least 1. Default: 1.
-    # - +memory_gb+: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1.
-    # - +disk_gb+: Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4.
-    # - +image+: The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
-    # - +user+: Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
-    # - +volumes+: Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it.
-    # - +max_cost+: The most one run may cost, in US dollars (`"0.50"`): a run pauses once it has cost that, as a machine at its maxCost does.
-    # - +id+: Its ID.
-    # - +object+: Always `job`.
-    # - +name+: Its name, unique in its project.
-    # - +state+: Where it is: `scheduled` (its runs are made at their times), `paused` (none is), `finished` (its one time ran).
-    # - +labels+: Its labels.
-    # - +next_run_at+: When its next run is made, or its next retry; none when paused or finished.
-    # - +last_error+: Why its last time's run was not made, when it was refused: that time failed and it waits for its next; none once a run is made.
-    # - +created_at+: When it was created.
-    # - +revision+: Its revision, changed by every change to it.
-    # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
-    Job = Struct.new(:schedule, :run, :retry, :secrets, :vcpu, :memory_gb, :disk_gb, :image, :user, :volumes, :max_cost, :id, :object, :name, :state, :labels, :next_run_at, :last_error, :created_at, :revision, :deleted_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "at" => self.at,
+        "status" => self.status,
+        "code" => self.code,
+        "message" => self.message,
+        "requestId" => self.request_id,
+      }.compact
+    end
+  end
 
-        new(
-          schedule: JobSchedule.from(h["schedule"]),
-          run: SandboxRun.from(h["run"]),
-          retry: JobRetry.from(h["retry"]),
-          secrets: JobSecrets.from(h["secrets"]),
-          vcpu: h["vcpu"],
-          memory_gb: h["memoryGB"],
-          disk_gb: h["diskGB"],
-          image: h["image"],
-          user: h["user"],
-          volumes: h["volumes"]&.map { |i| VolumeMount.from(i) },
-          max_cost: h["maxCost"],
-          id: h["id"],
-          object: h["object"],
-          name: h["name"],
-          state: h["state"],
-          labels: h["labels"],
-          next_run_at: h["nextRunAt"],
-          last_error: JobError.from(h["lastError"]),
-          created_at: h["createdAt"],
-          revision: h["revision"],
-          deleted_at: h["deletedAt"],
-        )
-      end
+  # A job.
+  # - +schedule+: When it runs.
+  # - +run+: The command each run runs; the run ends when it ends.
+  # - +retry+: How a failed run is run again; never when omitted.
+  # - +secrets+: Which of its org's secrets each run gets; every one whose scope admits it when omitted.
+  # - +vcpu+: Each run's vCPUs; a job's default (1) when omitted. At least 1.
+  # - +memory_gb+: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1.
+  # - +disk_gb+: Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1.
+  # - +image+: The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
+  # - +user+: Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
+  # - +volumes+: Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it.
+  # - +max_cost+: The most one run may cost, in US dollars (`"0.50"`): a run pauses once it has cost that, as a machine at its maxCost does.
+  # - +id+: Its ID.
+  # - +object+: Always `job`.
+  # - +name+: Its name, unique in its project.
+  # - +state+: Where it is: `scheduled` (its runs are made at their times), `paused` (none is), `finished` (its one time ran).
+  # - +labels+: Its labels.
+  # - +next_run_at+: When its next run is made, or its next retry; none when paused or finished.
+  # - +last_error+: Why its last time's run was not made, when it was refused: that time failed and it waits for its next; none once a run is made.
+  # - +created_at+: When it was created.
+  # - +revision+: Its revision, changed by every change to it.
+  # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
+  JobInfo = Struct.new(:schedule, :run, :retry, :secrets, :vcpu, :memory_gb, :disk_gb, :image, :user, :volumes, :max_cost, :id, :object, :name, :state, :labels, :next_run_at, :last_error, :created_at, :revision, :deleted_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "schedule" => self.schedule&.to_wire,
-          "run" => self.run&.to_wire,
-          "retry" => self.retry&.to_wire,
-          "secrets" => self.secrets&.to_wire,
-          "vcpu" => self.vcpu,
-          "memoryGB" => self.memory_gb,
-          "diskGB" => self.disk_gb,
-          "image" => self.image,
-          "user" => self.user,
-          "volumes" => self.volumes&.map { |i| i&.to_wire },
-          "maxCost" => self.max_cost,
-          "id" => self.id,
-          "object" => self.object,
-          "name" => self.name,
-          "state" => self.state,
-          "labels" => self.labels,
-          "nextRunAt" => self.next_run_at,
-          "lastError" => self.last_error&.to_wire,
-          "createdAt" => self.created_at,
-          "revision" => self.revision,
-          "deletedAt" => self.deleted_at,
-        }.compact
-      end
+      new(
+        schedule: JobSchedule.from(h["schedule"]),
+        run: SandboxRun.from(h["run"]),
+        retry: JobRetry.from(h["retry"]),
+        secrets: JobSecrets.from(h["secrets"]),
+        vcpu: h["vcpu"],
+        memory_gb: h["memoryGB"],
+        disk_gb: h["diskGB"],
+        image: h["image"],
+        user: h["user"],
+        volumes: h["volumes"]&.map { |i| VolumeMount.from(i) },
+        max_cost: h["maxCost"],
+        id: h["id"],
+        object: h["object"],
+        name: h["name"],
+        state: h["state"],
+        labels: h["labels"],
+        next_run_at: h["nextRunAt"],
+        last_error: JobError.from(h["lastError"]),
+        created_at: h["createdAt"],
+        revision: h["revision"],
+        deleted_at: h["deletedAt"],
+      )
     end
 
-    # A command run in a fresh machine, once or on a cron schedule in a timezone. Each run is a machine made at its time, deleted when its command ends, and billed as any machine is; its exit code and its last 256 KiB of output are kept. Runs of one job never overlap: a time that comes while one runs is made once it ends, and times missed make one run.
-    class Jobs
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "schedule" => self.schedule&.to_wire,
+        "run" => self.run&.to_wire,
+        "retry" => self.retry&.to_wire,
+        "secrets" => self.secrets&.to_wire,
+        "vcpu" => self.vcpu,
+        "memoryGB" => self.memory_gb,
+        "diskGB" => self.disk_gb,
+        "image" => self.image,
+        "user" => self.user,
+        "volumes" => self.volumes&.map { |i| i&.to_wire },
+        "maxCost" => self.max_cost,
+        "id" => self.id,
+        "object" => self.object,
+        "name" => self.name,
+        "state" => self.state,
+        "labels" => self.labels,
+        "nextRunAt" => self.next_run_at,
+        "lastError" => self.last_error&.to_wire,
+        "createdAt" => self.created_at,
+        "revision" => self.revision,
+        "deletedAt" => self.deleted_at,
+      }.compact
+    end
+  end
 
-      # Creates a job. Its first run is made at its schedule's first time. Asked again with the same Idempotency-Key, it returns the same job.
-      def create(schedule: nil, run: nil, retry: nil, secrets: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, image: nil, user: nil, volumes: nil, max_cost: nil, name: nil, labels: nil, idempotency_key: nil)
-        Job.from(@transport.request("POST", "/v2/jobs", body: { "schedule" => schedule, "run" => run, "retry" => binding.local_variable_get(:retry), "secrets" => secrets, "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "image" => image, "user" => user, "volumes" => volumes, "maxCost" => max_cost, "name" => name, "labels" => labels }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+  # One of jobs: A command run in a fresh machine, once or on a cron schedule in a timezone. Each run is a machine made at its time, deleted when its command ends, and billed as any machine is; its exit code and its last 256 KiB of output are kept. Runs of one job never overlap: a time that comes while one runs is made once it ends, and times missed make one run.
+  class Job
+    # What it was when last read, and what is under it.
+    attr_reader :info
 
-      # Returns a job.
-      def get(id)
-        Job.from(@transport.request("GET", "/v2/jobs/#{URI.encode_www_form_component(id)}", idempotent: true))
-      end
+    def initialize(client, info)
+      @c = client
+      @info = info
+    end
 
-      # Lists the project's jobs, newest first.
-      def list(label: nil, cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/jobs", query: { "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Job.from(i) }
-      end
+    # Its id.
+    def id
+      @info.id
+    end
 
-      # Deletes a job: no run is made from then on, and a run in flight is ended. Its runs' records stay readable for 7 days.
-      def delete(id, idempotency_key: nil)
-        Job.from(@transport.request("DELETE", "/v2/jobs/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # When it runs.
+    def schedule
+      @info.schedule
+    end
 
-      # Pauses a job: no run is made at its times until it is resumed. A run in flight runs to its end.
-      def pause(id, idempotency_key: nil)
-        Job.from(@transport.request("POST", "/v2/jobs/#{URI.encode_www_form_component(id)}:pause", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # How a failed run is run again; never when omitted.
+    def retry
+      @info.retry
+    end
 
-      # Resumes a paused job: its next run is made at its schedule's next time from now.
-      def resume(id, idempotency_key: nil)
-        Job.from(@transport.request("POST", "/v2/jobs/#{URI.encode_www_form_component(id)}:resume", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Which of its org's secrets each run gets; every one whose scope admits it when omitted.
+    def secrets
+      @info.secrets
+    end
 
-      # Changes a job's settings: each one named replaces its own, the rest are kept. Runs made from then on use them; one in flight runs as it was made. A new schedule's next run is at its next time from now.
-      def update(id, schedule: nil, run: nil, retry: nil, secrets: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, image: nil, user: nil, volumes: nil, max_cost: nil, idempotency_key: nil)
-        Job.from(@transport.request("POST", "/v2/jobs/#{URI.encode_www_form_component(id)}:update", body: { "schedule" => schedule, "run" => run, "retry" => binding.local_variable_get(:retry), "secrets" => secrets, "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "image" => image, "user" => user, "volumes" => volumes, "maxCost" => max_cost }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Each run's vCPUs; a job's default (1) when omitted.
+    def vcpu
+      @info.vcpu
+    end
 
-      # Makes a run now, beside its schedule; a paused job stays paused. Refused 409 while a run of it is in flight. Asked again with the same Idempotency-Key, it makes nothing more.
-      def run(id, idempotency_key: nil)
-        Job.from(@transport.request("POST", "/v2/jobs/#{URI.encode_www_form_component(id)}:run", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted.
+    def memory_gb
+      @info.memory_gb
+    end
+
+    # Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger.
+    def disk_gb
+      @info.disk_gb
+    end
+
+    # The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
+    def image
+      @info.image
+    end
+
+    # Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
+    def user
+      @info.user
+    end
+
+    # Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it.
+    def volumes
+      @info.volumes
+    end
+
+    # The most one run may cost, in US dollars (`"0.50"`): a run pauses once it has cost that, as a machine at its maxCost does.
+    def max_cost
+      @info.max_cost
+    end
+
+    # Always `job`.
+    def object
+      @info.object
+    end
+
+    # Its name, unique in its project.
+    def name
+      @info.name
+    end
+
+    # Where it is: `scheduled` (its runs are made at their times), `paused` (none is), `finished` (its one time ran).
+    def state
+      @info.state
+    end
+
+    # Its labels.
+    def labels
+      @info.labels
+    end
+
+    # When its next run is made, or its next retry; none when paused or finished.
+    def next_run_at
+      @info.next_run_at
+    end
+
+    # Why its last time's run was not made, when it was refused: that time failed and it waits for its next; none once a run is made.
+    def last_error
+      @info.last_error
+    end
+
+    # When it was created.
+    def created_at
+      @info.created_at
+    end
+
+    # Its revision, changed by every change to it.
+    def revision
+      @info.revision
+    end
+
+    # When it was deleted: a delete's answer, its state `deleted`.
+    def deleted_at
+      @info.deleted_at
+    end
+
+    def inspect
+      "#<Job #{@info.inspect}>"
+    end
+
+    # Returns a job.
+    def refresh(wait: nil, if_state: nil)
+      @info = @c.get(@info.id, wait: wait, if_state: if_state).info
+      self
+    end
+
+    # Deletes a job: no run is made from then on, and a run in flight is ended. Its runs' records stay readable for 7 days.
+    def delete(idempotency_key: nil)
+      @c.delete(@info.id, idempotency_key: idempotency_key)
+    end
+
+    # Pauses a job: no run is made at its times until it is resumed. A run in flight runs to its end.
+    def pause(idempotency_key: nil)
+      @info = @c.pause(@info.id, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Resumes a paused job: its next run is made at its schedule's next time from now.
+    def resume(idempotency_key: nil)
+      @info = @c.resume(@info.id, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Changes a job's settings: each one named replaces its own, the rest are kept. Runs made from then on use them; one in flight runs as it was made. A new schedule's next run is at its next time from now.
+    def update(schedule: nil, run: nil, retry: nil, secrets: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, image: nil, user: nil, volumes: nil, max_cost: nil, idempotency_key: nil)
+      @info = @c.update(@info.id, schedule: schedule, run: run, retry: binding.local_variable_get(:retry), secrets: secrets, vcpu: vcpu, memory_gb: memory_gb, disk_gb: disk_gb, image: image, user: user, volumes: volumes, max_cost: max_cost, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Makes a run now, beside its schedule; a paused job stays paused. Refused 409 while a run of it is in flight. Asked again with the same Idempotency-Key, it makes nothing more.
+    def run(idempotency_key: nil)
+      @info = @c.run(@info.id, idempotency_key: idempotency_key)
+      self
+    end
+  end
+
+  # A command run in a fresh machine, once or on a cron schedule in a timezone. Each run is a machine made at its time, deleted when its command ends, and billed as any machine is; its exit code and its last 256 KiB of output are kept. Runs of one job never overlap: a time that comes while one runs is made once it ends, and times missed make one run.
+  class Jobs
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Creates a job. Its first run is made at its schedule's first time. Asked again with the same Idempotency-Key, it returns the same job.
+    def create(schedule: nil, run: nil, retry: nil, secrets: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, image: nil, user: nil, volumes: nil, max_cost: nil, name: nil, labels: nil, idempotency_key: nil)
+      Job.new(self, JobInfo.from(@transport.request("POST", "/v2/jobs", body: { "schedule" => schedule, "run" => run, "retry" => binding.local_variable_get(:retry), "secrets" => secrets, "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "image" => image, "user" => user, "volumes" => volumes, "maxCost" => max_cost, "name" => name, "labels" => labels }.compact, idempotency_key: idempotency_key, idempotent: true)))
+    end
+
+    # Returns a job.
+    def get(id, wait: nil, if_state: nil)
+      Job.new(self, JobInfo.from(@transport.request("GET", "/v2/jobs/#{URI.encode_www_form_component(id)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true)))
+    end
+
+    # Lists the project's jobs, newest first.
+    def list(label: nil, cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/jobs", query: { "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| JobInfo.from(i) }
+    end
+
+    # Deletes a job: no run is made from then on, and a run in flight is ended. Its runs' records stay readable for 7 days.
+    def delete(id, idempotency_key: nil)
+      JobInfo.from(@transport.request("DELETE", "/v2/jobs/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Pauses a job: no run is made at its times until it is resumed. A run in flight runs to its end.
+    def pause(id, idempotency_key: nil)
+      JobInfo.from(@transport.request("POST", "/v2/jobs/#{URI.encode_www_form_component(id)}:pause", idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Resumes a paused job: its next run is made at its schedule's next time from now.
+    def resume(id, idempotency_key: nil)
+      JobInfo.from(@transport.request("POST", "/v2/jobs/#{URI.encode_www_form_component(id)}:resume", idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Changes a job's settings: each one named replaces its own, the rest are kept. Runs made from then on use them; one in flight runs as it was made. A new schedule's next run is at its next time from now.
+    def update(id, schedule: nil, run: nil, retry: nil, secrets: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, image: nil, user: nil, volumes: nil, max_cost: nil, idempotency_key: nil)
+      JobInfo.from(@transport.request("POST", "/v2/jobs/#{URI.encode_www_form_component(id)}:update", body: { "schedule" => schedule, "run" => run, "retry" => binding.local_variable_get(:retry), "secrets" => secrets, "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "image" => image, "user" => user, "volumes" => volumes, "maxCost" => max_cost }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Makes a run now, beside its schedule; a paused job stays paused. Refused 409 while a run of it is in flight. Asked again with the same Idempotency-Key, it makes nothing more.
+    def run(id, idempotency_key: nil)
+      JobInfo.from(@transport.request("POST", "/v2/jobs/#{URI.encode_www_form_component(id)}:run", idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

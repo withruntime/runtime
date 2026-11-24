@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import com.withruntime.generated.Sandboxes.Stored;
 import com.withruntime.generated.Sandboxes.MachineStart;
+import com.withruntime.generated.Snapshots.StoredUpdate;
 
 /** What a machine boots: a root filesystem, its environment and its start. */
 public final class Images {
@@ -391,13 +392,13 @@ public final class Images {
 
   /** What an image's build runs on: a machine of its own, deleted once the build ends. */
   public static final class ImageBuild {
-    /** Its vCPUs. At least 1. At most 8. Default: 2. */
+    /** Its vCPUs; a build machine's default when omitted. At least 1. At most 8. */
     public Long vcpu;
 
-    /** Its memory in GB. At least 1. At most 16. Default: 4. */
+    /** Its memory in GB; a build machine's default when omitted. At least 1. At most 16. */
     public Double memoryGB;
 
-    /** Its disk in GB: the base image, the earlier stages and the context. At least 4. At most 32. Default: 16. */
+    /** Its disk in GB: the base image, the earlier stages and the context. A build machine's default when omitted, at least its image's size. At least 4. At most 32. */
     public Double diskGB;
 
     /** Seconds the build may run before it fails. At least 60. At most 3600. Default: 1800. */
@@ -454,8 +455,11 @@ public final class Images {
     /** Tags its name takes for it once it is ready; `latest` when it has a name and none is given. At most 16 items. */
     public List<String> tags;
 
-    /** An OCI image to use as it is, from a public registry: `python:3.12-slim`, `ghcr.io/org/app:1`. */
+    /** An OCI image to use as it is: `python:3.12-slim`, `ghcr.io/org/app:1`. A private one is named by its digest, `repo@sha256:<64 hex digits>`, with `pullSecret`. */
     public String image;
+
+    /** The secret holding the registry login that pulls a private `image`: a hidden secret with header `Authorization`, format `Basic {value}`, its value the base64 of `username:token`, as its hosts the registry's token service (`auth.docker.io` for Docker Hub, the registry's own name for `ghcr.io`, `quay.io` and others), and as its scope `{"none": true}`, so no machine's requests carry it. Runtime's egress proxy signs in with it for this import's build machine alone, which never holds the login or a token. The caller needs the `secrets:use` permission. */
+    public String pullSecret;
 
     /** A Dockerfile: multi-stage builds, `ARG`, `COPY --from`, heredocs. `COPY` reads `files`. */
     public String dockerfile;
@@ -487,6 +491,12 @@ public final class Images {
     /** What its build runs on. */
     public ImageBuild build;
 
+    /** Seconds until Runtime deletes this version, as its delete does: final, and it can't be undone; one an App boots is deleted once none does. 0 or omitted: kept until deleted. At least 0. At most 315360000. */
+    public Long deleteAfterSeconds;
+
+    /** Whether this version's delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`. */
+    public Boolean deleteProtection;
+
     public ImageCreate name(String v) {
       this.name = v;
       return this;
@@ -504,6 +514,11 @@ public final class Images {
 
     public ImageCreate image(String v) {
       this.image = v;
+      return this;
+    }
+
+    public ImageCreate pullSecret(String v) {
+      this.pullSecret = v;
       return this;
     }
 
@@ -557,6 +572,16 @@ public final class Images {
       return this;
     }
 
+    public ImageCreate deleteAfterSeconds(Long v) {
+      this.deleteAfterSeconds = v;
+      return this;
+    }
+
+    public ImageCreate deleteProtection(Boolean v) {
+      this.deleteProtection = v;
+      return this;
+    }
+
     static ImageCreate of(Object raw) {
       Map<String, Object> m = KitJson.object(raw);
       ImageCreate o = new ImageCreate();
@@ -564,6 +589,7 @@ public final class Images {
       o.labels = KitJson.asStringMap(m.get("labels"));
       o.tags = KitJson.asStringList(m.get("tags"));
       o.image = KitJson.asString(m.get("image"));
+      o.pullSecret = KitJson.asString(m.get("pullSecret"));
       o.dockerfile = KitJson.asString(m.get("dockerfile"));
       o.recipe = (m.get("recipe") == null ? null : ImageRecipe.of(m.get("recipe")));
       o.files = (m.get("files") == null ? null : KitJson.array(m.get("files")).stream().map(ImageFile::of).toList());
@@ -574,6 +600,8 @@ public final class Images {
       o.env = KitJson.asStringMap(m.get("env"));
       o.start = (m.get("start") == null ? null : MachineStart.of(m.get("start")));
       o.build = (m.get("build") == null ? null : ImageBuild.of(m.get("build")));
+      o.deleteAfterSeconds = KitJson.asLong(m.get("deleteAfterSeconds"));
+      o.deleteProtection = (m.get("deleteProtection") instanceof Boolean b ? b : null);
       return o;
     }
 
@@ -583,6 +611,7 @@ public final class Images {
       if (labels != null) m.put("labels", labels);
       if (tags != null) m.put("tags", tags);
       if (image != null) m.put("image", image);
+      if (pullSecret != null) m.put("pullSecret", pullSecret);
       if (dockerfile != null) m.put("dockerfile", dockerfile);
       if (recipe != null) m.put("recipe", recipe.toMap());
       if (files != null) m.put("files", files.stream().map(i -> i.toMap()).toList());
@@ -593,6 +622,8 @@ public final class Images {
       if (env != null) m.put("env", env);
       if (start != null) m.put("start", start.toMap());
       if (build != null) m.put("build", build.toMap());
+      if (deleteAfterSeconds != null) m.put("deleteAfterSeconds", deleteAfterSeconds);
+      if (deleteProtection != null) m.put("deleteProtection", deleteProtection);
       return m;
     }
   }
@@ -715,6 +746,32 @@ public final class Images {
     }
   }
 
+  /** What get takes in its query. */
+  public static final class ImageGetQuery {
+    /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+    public Double wait;
+
+    /** The state the caller last read, which `wait` waits for it to leave. */
+    public String ifState;
+
+    public ImageGetQuery wait(Double v) {
+      this.wait = v;
+      return this;
+    }
+
+    public ImageGetQuery ifState(String v) {
+      this.ifState = v;
+      return this;
+    }
+
+    Map<String, Object> query() {
+      Map<String, Object> q = new LinkedHashMap<>();
+      if (wait != null) q.put("wait", String.valueOf(wait));
+      if (ifState != null) q.put("ifState", String.valueOf(ifState));
+      return q;
+    }
+  }
+
   /** What list takes in its query. */
   public static final class ImageListQuery {
     /** Only those of this name. */
@@ -804,8 +861,8 @@ public final class Images {
   }
 
   /** Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`). */
-  public Stored get(String id, Transport.RequestOptions opts) {
-    return Stored.of(t.request("GET", "/v2/images/" + Transport.path(id), null, null, new Transport.Call(true, null), opts));
+  public Stored get(String id, ImageGetQuery query, Transport.RequestOptions opts) {
+    return Stored.of(t.request("GET", "/v2/images/" + Transport.path(id), query == null ? null : query.query(), null, new Transport.Call(true, null), opts));
   }
 
   /** Lists the project's images, newest first. */
@@ -823,7 +880,7 @@ public final class Images {
     return ChunkStored.of(t.requestData("PUT", "/v2/images/context/" + Transport.path(digest), null, data, new Transport.Call(true, null), opts));
   }
 
-  /** Deletes an image version. Sandboxes already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App. */
+  /** Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App. */
   public Stored delete(String id, Transport.RequestOptions opts) {
     return Stored.of(t.request("DELETE", "/v2/images/" + Transport.path(id), null, null, new Transport.Call(false, null), opts));
   }
@@ -836,6 +893,11 @@ public final class Images {
   /** Returns an image's build log after a line, as the build writes it and once it has ended. */
   public ImageLogs logs(String id, ImageLogsQuery query, Transport.RequestOptions opts) {
     return ImageLogs.of(t.request("GET", "/v2/images/" + Transport.path(id) + "/logs", query == null ? null : query.query(), null, new Transport.Call(true, null), opts));
+  }
+
+  /** Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is. */
+  public Stored update(String id, StoredUpdate input, Transport.RequestOptions opts) {
+    return Stored.of(t.request("POST", "/v2/images/" + Transport.path(id) + ":update", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
 }

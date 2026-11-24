@@ -20,6 +20,9 @@ public final class Kit {
   public final Builds builds;
   public final Jobs jobs;
   public final JobRuns jobRuns;
+  public final Agents agents;
+  public final AgentSessions agentSessions;
+  public final Messages messages;
   public final Snapshots snapshots;
   public final Images images;
   public final Volumes volumes;
@@ -63,6 +66,9 @@ public final class Kit {
     this.builds = new Builds(transport);
     this.jobs = new Jobs(transport);
     this.jobRuns = new JobRuns(transport);
+    this.agents = new Agents(transport);
+    this.agentSessions = new AgentSessions(transport);
+    this.messages = new Messages(transport);
     this.snapshots = new Snapshots(transport);
     this.images = new Images(transport);
     this.volumes = new Volumes(transport);

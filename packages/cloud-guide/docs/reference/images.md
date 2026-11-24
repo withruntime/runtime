@@ -17,6 +17,7 @@ Its states: `making`, `ready`, `failed`, `deleted`.
 | `DELETE` | `/v2/images/{id}` | [Delete a image](#delete-a-image) |
 | `POST` | `/v2/images` | [Create a image](#create-a-image) |
 | `GET` | `/v2/images/{id}/logs` | [logs](#logs) |
+| `POST` | `/v2/images/{id}:update` | [update](#update) |
 
 ## Get a image
 
@@ -27,6 +28,13 @@ Returns an image, by its ID, its name (its newest version) or one of its tags (`
 Its action, for a key's grant: `images:get`.
 
 Path: `id`.
+
+Query:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `wait` | number | No | Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. |
+| `ifState` | string | No | The state the caller last read, which `wait` waits for it to leave. |
 
 Returns a [Stored](#stored).
 
@@ -56,8 +64,8 @@ result = runtime.images.get("IMAGE_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.images.get("IMAGE_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.images.get("IMAGE_ID")
 ```
 
 ```bash title="CLI"
@@ -110,8 +118,8 @@ result = runtime.images.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.images.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.images.list
 ```
 
 ```bash title="CLI"
@@ -158,8 +166,8 @@ result = runtime.images.missing(digests=["example"])
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.images.missing(digests: ["example"])
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.images.missing(digests: ["example"])
 ```
 
 ```bash title="CLI"
@@ -208,8 +216,8 @@ result = runtime.images.put("DIGEST_ID", b"hello\n")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.images.put("DIGEST_ID", "hello\n")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.images.put("DIGEST_ID", "hello\n")
 ```
 
 ```bash title="CLI"
@@ -220,7 +228,7 @@ runtime images put DIGEST_ID < hello.txt
 
 `DELETE /v2/images/{id}`
 
-Deletes an image version. Sandboxes already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App.
+Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App.
 
 Its action, for a key's grant: `images:delete`.
 
@@ -254,8 +262,8 @@ result = runtime.images.delete("IMAGE_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.images.delete("IMAGE_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.images.delete("IMAGE_ID")
 ```
 
 ```bash title="CLI"
@@ -302,8 +310,8 @@ result = runtime.images.create()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.images.create
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.images.create
 ```
 
 ```bash title="CLI"
@@ -356,12 +364,60 @@ result = runtime.images.logs("IMAGE_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.images.logs("IMAGE_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.images.logs("IMAGE_ID")
 ```
 
 ```bash title="CLI"
 runtime images logs IMAGE_ID
+```
+
+## `update`
+
+`POST /v2/images/{id}:update`
+
+Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+
+Its action, for a key's grant: `images:update`.
+
+Path: `id`.
+
+Body: a [StoredUpdate](#storedupdate).
+
+Returns a [Stored](#stored).
+
+Examples:
+
+```bash title="curl"
+curl -X POST "https://api.withruntime.com/v2/images/IMAGE_ID:update" \
+  -H "Authorization: Bearer $RUNTIME_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts title="TypeScript"
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime(); // RUNTIME_API_KEY from the environment
+const result = await runtime.images.update("IMAGE_ID");
+```
+
+```python title="Python"
+from withruntime import Runtime
+
+runtime = Runtime()  # RUNTIME_API_KEY from the environment
+result = runtime.images.update("IMAGE_ID")
+```
+
+```ruby title="Ruby"
+require "withruntime"
+
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.images.update("IMAGE_ID")
+```
+
+```bash title="CLI"
+runtime images update IMAGE_ID
 ```
 
 ## Objects
@@ -379,13 +435,16 @@ Stored data: a snapshot, an image or a volume.
 | `labels` | labels (keys under `runtime.` are Runtime's) | Yes | Its labels. |
 | `sizeBytes` | integer | Yes | What it was made to hold, in bytes. |
 | `storedBytes` | integer | Yes | What it holds now, in bytes. |
-| `parentId` | string | No | What it was made from (a snapshot's sandbox, an image's base), if anything. |
+| `parentId` | string | No | What it was made from (a snapshot's machine, an image's base), if anything. |
 | `attachedTo` | string | No | The machine it is attached to now, if any. |
 | `createdAt` | string (RFC 3339) | No | When it was made. |
 | `version` | integer | No | An image's version of its name: each build or keep of a name is its next. |
 | `tags` | list of string | No | An image's tags, each `name:tag`. |
 | `error` | string | No | Why an image's build failed. |
 | `deletedAt` | string (RFC 3339) | No | When it was deleted: a delete's answer, its state `deleted`. |
+| `deleteAt` | string (RFC 3339) | No | When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted. |
+| `deleteWaitsFor` | string | No | Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does. |
+| `deleteProtection` | boolean | No | Whether its delete is refused (409 `delete_protected`) until an update turns this off. |
 
 ### ContextAsked
 
@@ -488,9 +547,9 @@ What an image's build runs on: a machine of its own, deleted once the build ends
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `vcpu` | integer | No | Its vCPUs. At least 1. At most 8. Default: 2. |
-| `memoryGB` | number | No | Its memory in GB. At least 1. At most 16. Default: 4. |
-| `diskGB` | number | No | Its disk in GB: the base image, the earlier stages and the context. At least 4. At most 32. Default: 16. |
+| `vcpu` | integer | No | Its vCPUs; a build machine's default when omitted. At least 1. At most 8. |
+| `memoryGB` | number | No | Its memory in GB; a build machine's default when omitted. At least 1. At most 16. |
+| `diskGB` | number | No | Its disk in GB: the base image, the earlier stages and the context. A build machine's default when omitted, at least its image's size. At least 4. At most 32. |
 | `timeoutSeconds` | integer | No | Seconds the build may run before it fails. At least 60. At most 3600. Default: 1800. |
 
 ### ImageCreate
@@ -502,7 +561,8 @@ An image to build, from exactly one of `image` and `dockerfile`.
 | `name` | string | No | Its name, 1 to 64 of `a-z`, `0-9`, `.`, `_` and `-`: each build of a name is its next version. |
 | `labels` | labels (keys under `runtime.` are Runtime's) | No | Labels to find it by. |
 | `tags` | list of string | No | Tags its name takes for it once it is ready; `latest` when it has a name and none is given. At most 16 items. |
-| `image` | string | No | An OCI image to use as it is, from a public registry: `python:3.12-slim`, `ghcr.io/org/app:1`. |
+| `image` | string | No | An OCI image to use as it is: `python:3.12-slim`, `ghcr.io/org/app:1`. A private one is named by its digest, `repo@sha256:<64 hex digits>`, with `pullSecret`. |
+| `pullSecret` | string | No | The secret holding the registry login that pulls a private `image`: a hidden secret with header `Authorization`, format `Basic {value}`, its value the base64 of `username:token`, as its hosts the registry's token service (`auth.docker.io` for Docker Hub, the registry's own name for `ghcr.io`, `quay.io` and others), and as its scope `{"none": true}`, so no machine's requests carry it. Runtime's egress proxy signs in with it for this import's build machine alone, which never holds the login or a token. The caller needs the `secrets:use` permission. |
 | `dockerfile` | string | No | A Dockerfile: multi-stage builds, `ARG`, `COPY --from`, heredocs. `COPY` reads `files`. |
 | `recipe` | [ImageRecipe](#imagerecipe) | No | Packages, files and commands, rendered into a Dockerfile. Not with `files` or `context`. |
 | `files` | list of [ImageFile](#imagefile) | No | The Dockerfile's build context, inline: at most 1 MiB in all. Not with `context`. At most 256 items. |
@@ -513,6 +573,8 @@ An image to build, from exactly one of `image` and `dockerfile`.
 | `env` | object of strings | No | Environment every machine from it starts with, over the Dockerfile's `ENV`. |
 | `start` | [MachineStart](#machinestart) | No | What every machine from it starts at each fresh boot, in place of the Dockerfile's `ENTRYPOINT` and `CMD`. |
 | `build` | [ImageBuild](#imagebuild) | No | What its build runs on. |
+| `deleteAfterSeconds` | integer | No | Seconds until Runtime deletes this version, as its delete does: final, and it can't be undone; one an App boots is deleted once none does. 0 or omitted: kept until deleted. At least 0. At most 315360000. |
+| `deleteProtection` | boolean | No | Whether this version's delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`. |
 
 ### ImageLogLine
 
@@ -536,3 +598,12 @@ An image's build log after a line.
 | `state` | one of `making`, `ready`, `failed`, `deleted` | Yes | The image's state. |
 | `truncated` | boolean | Yes | Whether lines before these were dropped. |
 | `done` | boolean | Yes | Whether the build has ended: no line comes after these. |
+
+### StoredUpdate
+
+A change to a snapshot, an image version or a volume: each field left out stays as it is.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `deleteAfterSeconds` | integer | No | Seconds from now until Runtime deletes it, as its delete does: final, and it can't be undone. Sent again before then, it renews it; 0 takes its end off (kept until deleted). At least 0. At most 315360000. |
+| `deleteProtection` | boolean | No | true refuses its delete (409 `delete_protected`) until an update sends false. Not while it has a `deleteAt`, unless the same update sends `deleteAfterSeconds` 0. |

@@ -8,7 +8,7 @@ A machine running headless Chromium, driven over the Chrome DevTools Protocol at
 | --- | --- |
 | vCPUs | 2 |
 | Memory | 4 GB |
-| Disk | 4 GB |
+| Disk | 4 GB, or its image's size when larger |
 | Image | `runtime/browsers` |
 | Pauses when idle | After 60 seconds |
 

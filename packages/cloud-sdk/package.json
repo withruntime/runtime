@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Runtime Cloud: Linux sandboxes for agents. new Runtime(), a sandbox handle, every verb of the API typed, the runtime CLI, its MCP bridge and drop-ins for E2B, Daytona, Vercel, Blaxel, Morph, Modal, Cloudflare and Fly.",
   "license": "Apache-2.0",
   "type": "module",
@@ -17,13 +17,15 @@
     "./fly": { "types": "./dist/v2/shims/fly.d.ts", "default": "./dist/v2/shims/fly.js" }
   },
   "bin": { "runtime": "dist/v2/cli.js", "withruntime": "dist/v2/cli.js" },
-  "files": ["dist", "LICENSE"],
+  "files": ["dist", "LICENSE", "README.md", "CHANGELOG.md"],
+  "keywords": ["sandbox", "cloud", "agents", "ai-agents", "microvm", "firecracker", "code-execution", "code-interpreter", "mcp", "browser", "desktop", "jupyter", "ci", "serverless", "containers"],
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/v2/cli.js && cp openapi.json dist/v2/openapi.json"
   },
   "devDependencies": { "typescript": "5.9.3", "@types/node": "22.15.0" },
   "engines": { "node": ">=22.12" },
   "homepage": "https://withruntime.com",
-  "repository": { "type": "git", "url": "git+https://github.com/withruntime/runtime.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/withruntime/runtime.git", "directory": "packages/cloud-sdk" },
+  "bugs": { "url": "https://github.com/withruntime/runtime/issues" },
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" }
 }

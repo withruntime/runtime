@@ -10,7 +10,21 @@ import (
 	"strconv"
 )
 
-// Project A project: where sandboxes, storage, addresses and keys sit.
+// ProjectLimits A project's own limits: each of its organization's plan limits set lower for it alone, never higher, by the price card's names and in its units. A start in it is held to both. One not set is its organization's.
+type ProjectLimits struct {
+	// RunningVcpu The most vCPUs its machines run at once. At least 0.
+	RunningVcpu *int64 `json:"runningVcpu,omitempty"`
+	// RunningMemoryGib The most memory its machines hold at once, in GiB. At least 0.
+	RunningMemoryGib *int64 `json:"runningMemoryGib,omitempty"`
+	// MachineVcpu The most vCPUs one of its machines has. At least 0.
+	MachineVcpu *int64 `json:"machineVcpu,omitempty"`
+	// MachineMemoryGib The most memory one of its machines has, in GiB. At least 0.
+	MachineMemoryGib *int64 `json:"machineMemoryGib,omitempty"`
+	// NewMachinesPerSecond The most machines it starts a second. At least 0.
+	NewMachinesPerSecond *int64 `json:"newMachinesPerSecond,omitempty"`
+}
+
+// Project A project: where machines, storage, addresses and keys sit.
 type Project struct {
 	// ID Its ID.
 	ID string `json:"id"`
@@ -26,12 +40,22 @@ type Project struct {
 	State string `json:"state"`
 	// DeletedAt When it was deleted: a delete's answer, its state `deleted`.
 	DeletedAt *string `json:"deletedAt,omitempty"`
+	// Limits Its own limits: those of its organization's plan limits set lower for it. One not set is its organization's.
+	Limits ProjectLimits `json:"limits"`
 }
 
 // ProjectCreate A new project.
 type ProjectCreate struct {
 	// Name Its name, unique in the organization. At least 1 character. At most 64 characters.
 	Name string `json:"name"`
+	// Limits Its own limits ([`ProjectLimits`]); none, its organization's.
+	Limits *ProjectLimits `json:"limits,omitempty"`
+}
+
+// ProjectLimitsSet A project's own limits, set.
+type ProjectLimitsSet struct {
+	// Limits Its limits, the whole set: each one given is set, each one left out is its organization's again.
+	Limits ProjectLimits `json:"limits"`
 }
 
 // Rename A new name; everything else stays as it is.
@@ -59,7 +83,7 @@ func (q ProjectListQuery) values() url.Values {
 	return v
 }
 
-// Projects A project: where sandboxes, storage, addresses and keys sit, each in one. Every organization has a default project, where a call that names none acts.
+// Projects A project: where machines, storage, addresses and keys sit, each in one. Every organization has a default project, where a call that names none acts.
 type Projects struct {
 	t *Transport
 }
@@ -73,18 +97,27 @@ func (c *Projects) List(ctx context.Context, q ProjectListQuery, opts *RequestOp
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Projects) ListAll(ctx context.Context, q ProjectListQuery, opts *RequestOptions) iter.Seq2[Project, error] {
-	return all(func(cursor *string) (*Page[Project], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Project], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
 }
 
-// Create Creates a project. A name another project has returns 409. Asked again with the same Idempotency-Key, it returns the same one.
+// Create Creates a project, with its own limits when given. A name another project has returns 409; a limit above its organization's returns 400 `limit_above_org`. Asked again with the same Idempotency-Key, it returns the same one.
 func (c *Projects) Create(ctx context.Context, in ProjectCreate, opts *RequestOptions) (*Project, error) {
 	out := new(Project)
 	if err := c.t.Do(ctx, "POST", "/v2/projects", nil, in, Call{Idempotent: true}, opts, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Limits Sets a project's own limits: each of its organization's plan limits set lower for it alone, by the price card's names. The whole set: a limit left out is its organization's again. One above its organization's returns 400 `limit_above_org`, naming the limit and both figures. Each start in the project is held to its limits and its organization's.
+func (c *Projects) Limits(ctx context.Context, id string, in ProjectLimitsSet, opts *RequestOptions) (*Project, error) {
+	out := new(Project)
+	if err := c.t.Do(ctx, "POST", "/v2/projects/"+url.PathEscape(id)+":limits", nil, in, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -99,7 +132,7 @@ func (c *Projects) Update(ctx context.Context, id string, in Rename, opts *Reque
 	return out, nil
 }
 
-// Delete Deletes a project and frees its name, with the grants, keys and invitations held to it. The caller needs `grants:delete` as well, as the grants go with it. The default project, or one that still holds a sandbox, storage or an address, returns 409. Deleted again, it returns 404.
+// Delete Deletes a project and frees its name, with the grants, keys and invitations held to it. The caller needs `grants:delete` as well, as the grants go with it. The default project, or one that still holds a machine, storage or an address, returns 409. Deleted again, it returns 404.
 func (c *Projects) Delete(ctx context.Context, id string, opts *RequestOptions) (*Project, error) {
 	out := new(Project)
 	if err := c.t.Do(ctx, "DELETE", "/v2/projects/"+url.PathEscape(id), nil, nil, Call{Idempotent: true}, opts, out); err != nil {

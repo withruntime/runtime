@@ -5,10 +5,11 @@ description: Move a project's sandbox code from another provider (E2B, Daytona, 
 
 # Switch a project to Runtime Cloud
 
-Runtime keeps the switch guide current. Read it first with the `runtime` MCP
-server: `runtime_docs_read` with topic `migrate` (or
-https://withruntime.com/docs/migrate.md), and follow it step by step. For a
-project with no sandbox code yet, read topic `start` instead.
+Runtime keeps the switch guides current. Read https://withruntime.com/llms.txt
+first, then the Switch guide for the old provider it lists (for example
+https://withruntime.com/docs/switch-from-e2b.md), and follow it step by step.
+For a project with no sandbox code yet, read
+https://withruntime.com/docs/start.md instead.
 
 In short, the guide has you:
 
@@ -26,10 +27,11 @@ In short, the guide has you:
    block deleted from its Wrangler config and a `RUNTIME_API_KEY` secret.
    Code that calls Fly's Machines API needs only its address changed, to
    `npx withruntime fly-api` (`withruntime/fly`).
-   Agent frameworks have ready integrations: see topic `frameworks`.
-3. Connect with one approval (`runtime_connect`, or `npx -y withruntime login`)
-   and run the project's own tests on the free trial with `funding: "trial"`.
-   Never spend paid credit, and never touch the old provider's account.
+   Agent frameworks have ready integrations: see
+   https://withruntime.com/integrations.
+3. Connect with one approval (`npx -y withruntime login`, which prints a link
+   to approve in the browser) and run the project's own tests on Runtime.
+   Never touch the old provider's account.
 4. Report what passed, what did not and why, and the monthly saving the guide
    shows how to work out.
 

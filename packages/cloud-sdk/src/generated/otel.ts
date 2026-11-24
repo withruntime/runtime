@@ -42,23 +42,23 @@ export type ExportListQuery = {
 
 /** The org's events as OpenTelemetry logs, sent to your OTLP/HTTP endpoint. */
 export class Otel {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Makes an OpenTelemetry export. */
   create(input: ExportCreate, options?: RequestOptions): Promise<Export> {
-    return this.#t.request<Export>("POST", `/v2/otel`, { body: input, options });
+    return this.transport.request<Export>("POST", `/v2/otel`, { body: input, options });
   }
 
   /** Lists the org's, oldest first. */
-  list(query: ExportListQuery = {}, options?: RequestOptions): Paginated<Export> {
-    return new Paginated<Export>((cursor) => this.#t.request<Page<Export>>("GET", `/v2/otel`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: ExportListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Export> {
+    return new Paginated<Export>((cursor) => this.transport.request<Page<Export>>("GET", `/v2/otel`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 
   /** Deletes it: nothing more is sent to it. */
   delete(id: string, options?: RequestOptions): Promise<Export> {
-    return this.#t.request<Export>("DELETE", `/v2/otel/${encodeURIComponent(id)}`, { options, idempotent: true });
+    return this.transport.request<Export>("DELETE", `/v2/otel/${encodeURIComponent(id)}`, { options, idempotent: true });
   }
 }

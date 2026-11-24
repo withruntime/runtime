@@ -61,9 +61,9 @@ func (c *Identities) List(ctx context.Context, q IdentityListQuery, opts *Reques
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Identities) ListAll(ctx context.Context, q IdentityListQuery, opts *RequestOptions) iter.Seq2[Identity, error] {
-	return all(func(cursor *string) (*Page[Identity], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Identity], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

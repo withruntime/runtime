@@ -100,11 +100,11 @@ class JobSettings:
     retry: Optional["JobRetry"] = None
     #: Which of its org's secrets each run gets; every one whose scope admits it when omitted.
     secrets: Optional["JobSecrets"] = None
-    #: Each run's vCPUs. At least 1. Default: 1.
+    #: Each run's vCPUs; a job's default (1) when omitted. At least 1.
     vcpu: Optional[int] = None
-    #: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1.
+    #: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1.
     memory_gb: Optional[float] = None
-    #: Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4.
+    #: Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1.
     disk_gb: Optional[float] = None
     #: The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
     image: Optional[str] = None
@@ -159,11 +159,11 @@ class JobCreate:
     retry: Optional["JobRetry"] = None
     #: Which of its org's secrets each run gets; every one whose scope admits it when omitted.
     secrets: Optional["JobSecrets"] = None
-    #: Each run's vCPUs. At least 1. Default: 1.
+    #: Each run's vCPUs; a job's default (1) when omitted. At least 1.
     vcpu: Optional[int] = None
-    #: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1.
+    #: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1.
     memory_gb: Optional[float] = None
-    #: Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4.
+    #: Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1.
     disk_gb: Optional[float] = None
     #: The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
     image: Optional[str] = None
@@ -269,11 +269,11 @@ class JobInfo:
     retry: Optional["JobRetry"] = None
     #: Which of its org's secrets each run gets; every one whose scope admits it when omitted.
     secrets: Optional["JobSecrets"] = None
-    #: Each run's vCPUs. At least 1. Default: 1.
+    #: Each run's vCPUs; a job's default (1) when omitted. At least 1.
     vcpu: Optional[int] = None
-    #: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1.
+    #: Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1.
     memory_gb: Optional[float] = None
-    #: Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4.
+    #: Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1.
     disk_gb: Optional[float] = None
     #: The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
     image: Optional[str] = None
@@ -361,12 +361,113 @@ class Job:
         """Its id."""
         return self.info.id
 
+    @property
+    def schedule(self) -> Optional["JobSchedule"]:
+        """When it runs."""
+        return self.info.schedule
+
+    @property
+    def retry(self) -> Optional["JobRetry"]:
+        """How a failed run is run again; never when omitted."""
+        return self.info.retry
+
+    @property
+    def secrets(self) -> Optional["JobSecrets"]:
+        """Which of its org's secrets each run gets; every one whose scope admits it when omitted."""
+        return self.info.secrets
+
+    @property
+    def vcpu(self) -> Optional[int]:
+        """Each run's vCPUs; a job's default (1) when omitted."""
+        return self.info.vcpu
+
+    @property
+    def memory_gb(self) -> Optional[float]:
+        """Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted."""
+        return self.info.memory_gb
+
+    @property
+    def disk_gb(self) -> Optional[float]:
+        """Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger."""
+        return self.info.disk_gb
+
+    @property
+    def image(self) -> Optional[str]:
+        """The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted."""
+        return self.info.image
+
+    @property
+    def user(self) -> Optional[Literal["runtime", "root", "unknown"]]:
+        """Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`."""
+        return self.info.user
+
+    @property
+    def volumes(self) -> Optional[List["VolumeMount"]]:
+        """Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it."""
+        return self.info.volumes
+
+    @property
+    def max_cost(self) -> Optional[str]:
+        """The most one run may cost, in US dollars (`"0.50"`): a run pauses once it has cost that, as a machine at its maxCost does."""
+        return self.info.max_cost
+
+    @property
+    def object(self) -> Literal["job", "unknown"]:
+        """Always `job`."""
+        return self.info.object
+
+    @property
+    def name(self) -> Optional[str]:
+        """Its name, unique in its project."""
+        return self.info.name
+
+    @property
+    def state(self) -> Literal["scheduled", "paused", "finished", "deleted", "unknown"]:
+        """Where it is: `scheduled` (its runs are made at their times), `paused` (none is), `finished` (its one time ran)."""
+        return self.info.state
+
+    @property
+    def labels(self) -> Dict[str, str]:
+        """Its labels."""
+        return self.info.labels
+
+    @property
+    def next_run_at(self) -> Optional[str]:
+        """When its next run is made, or its next retry; none when paused or finished."""
+        return self.info.next_run_at
+
+    @property
+    def last_error(self) -> Optional["JobError"]:
+        """Why its last time's run was not made, when it was refused: that time failed and it waits for its next; none once a run is made."""
+        return self.info.last_error
+
+    @property
+    def created_at(self) -> Optional[str]:
+        """When it was created."""
+        return self.info.created_at
+
+    @property
+    def revision(self) -> Optional[int]:
+        """Its revision, changed by every change to it."""
+        return self.info.revision
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer, its state `deleted`."""
+        return self.info.deleted_at
+
     def __repr__(self) -> str:
         return f"Job({self.info!r})"
 
-    def refresh(self) -> "Job":
+    @classmethod
+    def create(cls, *, api_key: Optional[str] = None, base_url: Optional[str] = None, project: Optional[str] = None, schedule: Optional["JobSchedule"] = None, run: Optional["SandboxRun"] = None, retry: Optional["JobRetry"] = None, secrets: Optional["JobSecrets"] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, image: Optional[str] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, volumes: Optional[List["VolumeMount"]] = None, max_cost: Optional[str] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idempotency_key: Optional[str] = None) -> "Job":
+        """Makes one and returns it, as ``Runtime().jobs.create()`` does, with a client of its own: ``RUNTIME_API_KEY``,
+        or ``api_key``. The other arguments are the create's."""
+        return Jobs(Transport(api_key=api_key, base_url=base_url, project=project)).create(schedule=schedule, run=run, retry=retry, secrets=secrets, vcpu=vcpu, memory_gb=memory_gb, disk_gb=disk_gb, image=image, user=user, volumes=volumes, max_cost=max_cost, name=name, labels=labels, idempotency_key=idempotency_key)
+
+    def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "Job":
         """Returns a job."""
-        self.info = (self._c.get(self.id)).info
+        self.info = (self._c.get(self.id, wait=wait, if_state=if_state)).info
         return self
 
     def delete(self, *, idempotency_key: Optional[str] = None) -> JobInfo:
@@ -393,6 +494,13 @@ class Job:
         self.info = self._c.run(self.id, idempotency_key=idempotency_key)
         return self
 
+    def __enter__(self) -> "Job":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        """Deletes it when the ``with`` block that holds it ends."""
+        self.delete()
+
 
 class Jobs:
     """A command run in a fresh machine, once or on a cron schedule in a timezone. Each run is a machine made at its time, deleted when its command ends, and billed as any machine is; its exit code and its last 256 KiB of output are kept. Runs of one job never overlap: a time that comes while one runs is made once it ends, and times missed make one run."""
@@ -404,9 +512,9 @@ class Jobs:
         """Creates a job. Its first run is made at its schedule's first time. Asked again with the same Idempotency-Key, it returns the same job."""
         return Job(self, JobInfo.from_dict(self._transport.request("POST", f"/v2/jobs", body=compact({"schedule": schedule, "run": run, "retry": retry, "secrets": secrets, "vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "image": image, "user": user, "volumes": volumes, "maxCost": max_cost, "name": name, "labels": labels}), idempotency_key=idempotency_key, idempotent=True)))
 
-    def get(self, id: str) -> Job:
+    def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> Job:
         """Returns a job."""
-        return Job(self, JobInfo.from_dict(self._transport.request("GET", f"/v2/jobs/{quote(id, safe='')}", idempotent=True)))
+        return Job(self, JobInfo.from_dict(self._transport.request("GET", f"/v2/jobs/{quote(id, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True)))
 
     def list(self, *, label: Optional[List[str]] = None, cursor: Optional[str] = None, limit: Optional[int] = None) -> Page[JobInfo]:
         """Lists the project's jobs, newest first."""
@@ -446,12 +554,113 @@ class AsyncJob:
         """Its id."""
         return self.info.id
 
+    @property
+    def schedule(self) -> Optional["JobSchedule"]:
+        """When it runs."""
+        return self.info.schedule
+
+    @property
+    def retry(self) -> Optional["JobRetry"]:
+        """How a failed run is run again; never when omitted."""
+        return self.info.retry
+
+    @property
+    def secrets(self) -> Optional["JobSecrets"]:
+        """Which of its org's secrets each run gets; every one whose scope admits it when omitted."""
+        return self.info.secrets
+
+    @property
+    def vcpu(self) -> Optional[int]:
+        """Each run's vCPUs; a job's default (1) when omitted."""
+        return self.info.vcpu
+
+    @property
+    def memory_gb(self) -> Optional[float]:
+        """Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted."""
+        return self.info.memory_gb
+
+    @property
+    def disk_gb(self) -> Optional[float]:
+        """Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger."""
+        return self.info.disk_gb
+
+    @property
+    def image(self) -> Optional[str]:
+        """The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted."""
+        return self.info.image
+
+    @property
+    def user(self) -> Optional[Literal["runtime", "root", "unknown"]]:
+        """Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`."""
+        return self.info.user
+
+    @property
+    def volumes(self) -> Optional[List["VolumeMount"]]:
+        """Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it."""
+        return self.info.volumes
+
+    @property
+    def max_cost(self) -> Optional[str]:
+        """The most one run may cost, in US dollars (`"0.50"`): a run pauses once it has cost that, as a machine at its maxCost does."""
+        return self.info.max_cost
+
+    @property
+    def object(self) -> Literal["job", "unknown"]:
+        """Always `job`."""
+        return self.info.object
+
+    @property
+    def name(self) -> Optional[str]:
+        """Its name, unique in its project."""
+        return self.info.name
+
+    @property
+    def state(self) -> Literal["scheduled", "paused", "finished", "deleted", "unknown"]:
+        """Where it is: `scheduled` (its runs are made at their times), `paused` (none is), `finished` (its one time ran)."""
+        return self.info.state
+
+    @property
+    def labels(self) -> Dict[str, str]:
+        """Its labels."""
+        return self.info.labels
+
+    @property
+    def next_run_at(self) -> Optional[str]:
+        """When its next run is made, or its next retry; none when paused or finished."""
+        return self.info.next_run_at
+
+    @property
+    def last_error(self) -> Optional["JobError"]:
+        """Why its last time's run was not made, when it was refused: that time failed and it waits for its next; none once a run is made."""
+        return self.info.last_error
+
+    @property
+    def created_at(self) -> Optional[str]:
+        """When it was created."""
+        return self.info.created_at
+
+    @property
+    def revision(self) -> Optional[int]:
+        """Its revision, changed by every change to it."""
+        return self.info.revision
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer, its state `deleted`."""
+        return self.info.deleted_at
+
     def __repr__(self) -> str:
         return f"AsyncJob({self.info!r})"
 
-    async def refresh(self) -> "AsyncJob":
+    @classmethod
+    async def create(cls, *, api_key: Optional[str] = None, base_url: Optional[str] = None, project: Optional[str] = None, schedule: Optional["JobSchedule"] = None, run: Optional["SandboxRun"] = None, retry: Optional["JobRetry"] = None, secrets: Optional["JobSecrets"] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, image: Optional[str] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, volumes: Optional[List["VolumeMount"]] = None, max_cost: Optional[str] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idempotency_key: Optional[str] = None) -> "AsyncJob":
+        """Makes one and returns it, as ``Runtime().jobs.create()`` does, with a client of its own: ``RUNTIME_API_KEY``,
+        or ``api_key``. The other arguments are the create's."""
+        return await AsyncJobs(AsyncTransport(api_key=api_key, base_url=base_url, project=project)).create(schedule=schedule, run=run, retry=retry, secrets=secrets, vcpu=vcpu, memory_gb=memory_gb, disk_gb=disk_gb, image=image, user=user, volumes=volumes, max_cost=max_cost, name=name, labels=labels, idempotency_key=idempotency_key)
+
+    async def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "AsyncJob":
         """Returns a job."""
-        self.info = (await self._c.get(self.id)).info
+        self.info = (await self._c.get(self.id, wait=wait, if_state=if_state)).info
         return self
 
     async def delete(self, *, idempotency_key: Optional[str] = None) -> JobInfo:
@@ -478,6 +687,13 @@ class AsyncJob:
         self.info = await self._c.run(self.id, idempotency_key=idempotency_key)
         return self
 
+    async def __aenter__(self) -> "AsyncJob":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        """Deletes it when the ``async with`` block that holds it ends."""
+        await self.delete()
+
 
 class AsyncJobs:
     """A command run in a fresh machine, once or on a cron schedule in a timezone. Each run is a machine made at its time, deleted when its command ends, and billed as any machine is; its exit code and its last 256 KiB of output are kept. Runs of one job never overlap: a time that comes while one runs is made once it ends, and times missed make one run."""
@@ -489,9 +705,9 @@ class AsyncJobs:
         """Creates a job. Its first run is made at its schedule's first time. Asked again with the same Idempotency-Key, it returns the same job."""
         return AsyncJob(self, JobInfo.from_dict(await self._transport.request("POST", f"/v2/jobs", body=compact({"schedule": schedule, "run": run, "retry": retry, "secrets": secrets, "vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "image": image, "user": user, "volumes": volumes, "maxCost": max_cost, "name": name, "labels": labels}), idempotency_key=idempotency_key, idempotent=True)))
 
-    async def get(self, id: str) -> AsyncJob:
+    async def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> AsyncJob:
         """Returns a job."""
-        return AsyncJob(self, JobInfo.from_dict(await self._transport.request("GET", f"/v2/jobs/{quote(id, safe='')}", idempotent=True)))
+        return AsyncJob(self, JobInfo.from_dict(await self._transport.request("GET", f"/v2/jobs/{quote(id, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True)))
 
     async def list(self, *, label: Optional[List[str]] = None, cursor: Optional[str] = None, limit: Optional[int] = None) -> AsyncPage[JobInfo]:
         """Lists the project's jobs, newest first."""

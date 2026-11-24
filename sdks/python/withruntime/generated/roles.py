@@ -57,6 +57,29 @@ class Role:
         })
 
 
+@dataclass
+class RoleActionsChange:
+    """A change to a role's actions: the actions to add and the actions to remove, in one step. Each is `product:action`, `product:*` or `*`."""
+
+    #: The actions to add. One the role already holds as written is left as it is. At most 100 items.
+    add: Optional[List[str]] = None
+    #: The actions to remove, each as the role holds it. One the role does not hold is ignored. At most 100 items.
+    remove: Optional[List[str]] = None
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "RoleActionsChange":
+        return cls(
+            add=d["add"] if d.get("add") is not None else None,
+            remove=d["remove"] if d.get("remove") is not None else None,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return compact({
+            "add": self.add,
+            "remove": self.remove,
+        })
+
+
 class Roles:
     """One of the organization's own roles: the actions a grant of it allows. The built-in roles (owner, admin, developer, viewer, billing) are not listed here."""
 
@@ -66,6 +89,10 @@ class Roles:
     def list(self, *, cursor: Optional[str] = None, limit: Optional[int] = None) -> Page[Role]:
         """Lists the organization's own roles, by name."""
         return page(self._transport.request("GET", f"/v2/roles", query={"cursor": cursor, "limit": limit}, idempotent=True), Role.from_dict, lambda c: self.list(cursor=c, limit=limit))
+
+    def actions(self, id: str, *, add: Optional[List[str]] = None, remove: Optional[List[str]] = None, idempotency_key: Optional[str] = None) -> Role:
+        """Adds actions to a role and removes actions from it, in place, and returns the role. Every key and grant that gives the role has the new actions from its next call; no key's secret changes. Only an owner or an admin may change a role's actions, and only to add actions the caller may perform itself across the whole organization: any other caller or action returns 403. An action no call has returns 400. A role Runtime manages (its name starts with `runtime.`) returns 409, as does a removal from a role that a deny grant gives (a deny is lifted only by deleting that grant; an addition is allowed), a removal that would leave the role with no actions, or one that removes an action the role still holds through a wildcard such as `images:*`. Adding an action the role already holds, or removing one it does not hold, changes nothing, so the call is safe to retry. Each change is one audit log entry, `roles:actions`, whose reason lists the actions added and removed."""
+        return Role.from_dict(self._transport.request("POST", f"/v2/roles/{quote(id, safe='')}:actions", body=compact({"add": add, "remove": remove}), idempotency_key=idempotency_key, idempotent=True))
 
     def update(self, id: str, *, name: str, idempotency_key: Optional[str] = None) -> Role:
         """Renames a role; its actions and its grants stay as they are. A built-in role's name, or another role's, returns 409."""
@@ -86,6 +113,10 @@ class AsyncRoles:
         """Lists the organization's own roles, by name."""
         return async_page(await self._transport.request("GET", f"/v2/roles", query={"cursor": cursor, "limit": limit}, idempotent=True), Role.from_dict, lambda c: self.list(cursor=c, limit=limit))
 
+    async def actions(self, id: str, *, add: Optional[List[str]] = None, remove: Optional[List[str]] = None, idempotency_key: Optional[str] = None) -> Role:
+        """Adds actions to a role and removes actions from it, in place, and returns the role. Every key and grant that gives the role has the new actions from its next call; no key's secret changes. Only an owner or an admin may change a role's actions, and only to add actions the caller may perform itself across the whole organization: any other caller or action returns 403. An action no call has returns 400. A role Runtime manages (its name starts with `runtime.`) returns 409, as does a removal from a role that a deny grant gives (a deny is lifted only by deleting that grant; an addition is allowed), a removal that would leave the role with no actions, or one that removes an action the role still holds through a wildcard such as `images:*`. Adding an action the role already holds, or removing one it does not hold, changes nothing, so the call is safe to retry. Each change is one audit log entry, `roles:actions`, whose reason lists the actions added and removed."""
+        return Role.from_dict(await self._transport.request("POST", f"/v2/roles/{quote(id, safe='')}:actions", body=compact({"add": add, "remove": remove}), idempotency_key=idempotency_key, idempotent=True))
+
     async def update(self, id: str, *, name: str, idempotency_key: Optional[str] = None) -> Role:
         """Renames a role; its actions and its grants stay as they are. A built-in role's name, or another role's, returns 409."""
         return Role.from_dict(await self._transport.request("POST", f"/v2/roles/{quote(id, safe='')}:update", body=compact({"name": name}), idempotency_key=idempotency_key, idempotent=True))
@@ -95,4 +126,4 @@ class AsyncRoles:
         return Role.from_dict(await self._transport.request("DELETE", f"/v2/roles/{quote(id, safe='')}", idempotency_key=idempotency_key, idempotent=True))
 
 
-__all__ = ["Role", "Roles", "AsyncRoles"]
+__all__ = ["Role", "RoleActionsChange", "Roles", "AsyncRoles"]

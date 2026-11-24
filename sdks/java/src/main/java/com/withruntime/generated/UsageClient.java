@@ -219,7 +219,7 @@ public final class UsageClient {
 
   /** The spend cap a key's creates are held to, and what is left under it. */
   public static final class KeySpendCap {
-    /** The most its holder's sandboxes may spend over windowSeconds, in US dollars. */
+    /** The most its holder's machines may spend over windowSeconds, in US dollars. */
     public String cap;
 
     /** What they spent over the window, in US dollars, as the cap counts it. */
@@ -271,6 +271,218 @@ public final class UsageClient {
     }
   }
 
+  /** One product's use in one hour, at the card's prices. */
+  public static final class UsageHour {
+    /** The hour's first moment (UTC). */
+    public String at;
+
+    /** What it was used by: the machine's kind (`sandbox`, `app`, `function`, `ci`, ...), what is kept on disk (`disk`, `volume`, `snapshot`, `image`), or `traffic`, what was sent out; `machine` or `storage` when what used it was deleted too long ago to name. */
+    public String product;
+
+    /** What it costs on the price card, before any credit, in US dollars. */
+    public String charged;
+
+    public UsageHour at(String v) {
+      this.at = v;
+      return this;
+    }
+
+    public UsageHour product(String v) {
+      this.product = v;
+      return this;
+    }
+
+    public UsageHour charged(String v) {
+      this.charged = v;
+      return this;
+    }
+
+    static UsageHour of(Object raw) {
+      Map<String, Object> m = KitJson.object(raw);
+      UsageHour o = new UsageHour();
+      o.at = KitJson.asString(m.get("at"));
+      o.product = KitJson.asString(m.get("product"));
+      o.charged = KitJson.asString(m.get("charged"));
+      return o;
+    }
+
+    Map<String, Object> toMap() {
+      Map<String, Object> m = new LinkedHashMap<>();
+      if (at != null) m.put("at", at);
+      if (product != null) m.put("product", product);
+      if (charged != null) m.put("charged", charged);
+      return m;
+    }
+  }
+
+  /** One meter's part of one product's month: a quantity at the card's rate. */
+  public static final class ProductLine {
+    /** What it was used by, as `hours` names it (`sandbox`, `disk`, `traffic`, ...). */
+    public String product;
+
+    /** The card's meter (`cpu`, `memory`, `traffic-out`, ...). */
+    public String meter;
+
+    /** The meter's name on the card (`CPU`, `Memory`), from `names::METERS`. */
+    public String name;
+
+    /** Used this month, in `unit`, as a decimal in text. */
+    public String quantity;
+
+    /** What `quantity` counts: `active vCPU-hours`, `GiB-hours`, `GiB-months`, `GB`, ... */
+    public String unit;
+
+    /** The card's price for one of `unit`, as the card writes it (`$0.03 per active vCPU-hour`). */
+    public String rate;
+
+    /** What it costs on the price card, before any credit, in US dollars. */
+    public String charged;
+
+    public ProductLine product(String v) {
+      this.product = v;
+      return this;
+    }
+
+    public ProductLine meter(String v) {
+      this.meter = v;
+      return this;
+    }
+
+    public ProductLine name(String v) {
+      this.name = v;
+      return this;
+    }
+
+    public ProductLine quantity(String v) {
+      this.quantity = v;
+      return this;
+    }
+
+    public ProductLine unit(String v) {
+      this.unit = v;
+      return this;
+    }
+
+    public ProductLine rate(String v) {
+      this.rate = v;
+      return this;
+    }
+
+    public ProductLine charged(String v) {
+      this.charged = v;
+      return this;
+    }
+
+    static ProductLine of(Object raw) {
+      Map<String, Object> m = KitJson.object(raw);
+      ProductLine o = new ProductLine();
+      o.product = KitJson.asString(m.get("product"));
+      o.meter = KitJson.asString(m.get("meter"));
+      o.name = KitJson.asString(m.get("name"));
+      o.quantity = KitJson.asString(m.get("quantity"));
+      o.unit = KitJson.asString(m.get("unit"));
+      o.rate = KitJson.asString(m.get("rate"));
+      o.charged = KitJson.asString(m.get("charged"));
+      return o;
+    }
+
+    Map<String, Object> toMap() {
+      Map<String, Object> m = new LinkedHashMap<>();
+      if (product != null) m.put("product", product);
+      if (meter != null) m.put("meter", meter);
+      if (name != null) m.put("name", name);
+      if (quantity != null) m.put("quantity", quantity);
+      if (unit != null) m.put("unit", unit);
+      if (rate != null) m.put("rate", rate);
+      if (charged != null) m.put("charged", charged);
+      return m;
+    }
+  }
+
+  /** What one key, or what was made with no key, used this month. */
+  public static final class KeySpend {
+    /** The key the machines and storage were made with. Omitted for what was made with no key (signed in to the console), and for `others`. */
+    public String keyId;
+
+    /** The key's name. */
+    public String name;
+
+    /** The person the key acts for, or who made it signed in to the console. */
+    public String accountId;
+
+    /** That person's email address. */
+    public String email;
+
+    /** The agent or CI pipeline the key acts as. */
+    public String agentId;
+
+    /** `key`: one key's. `console`: made signed in, with no key. `others`: keys the caller may not see, together. `unknown`: made by something deleted too long ago to name. */
+    public String source;
+
+    /** Charged this month at the card's rates, in US dollars. */
+    public String charged;
+
+    public KeySpend keyId(String v) {
+      this.keyId = v;
+      return this;
+    }
+
+    public KeySpend name(String v) {
+      this.name = v;
+      return this;
+    }
+
+    public KeySpend accountId(String v) {
+      this.accountId = v;
+      return this;
+    }
+
+    public KeySpend email(String v) {
+      this.email = v;
+      return this;
+    }
+
+    public KeySpend agentId(String v) {
+      this.agentId = v;
+      return this;
+    }
+
+    public KeySpend source(String v) {
+      this.source = v;
+      return this;
+    }
+
+    public KeySpend charged(String v) {
+      this.charged = v;
+      return this;
+    }
+
+    static KeySpend of(Object raw) {
+      Map<String, Object> m = KitJson.object(raw);
+      KeySpend o = new KeySpend();
+      o.keyId = KitJson.asString(m.get("keyId"));
+      o.name = KitJson.asString(m.get("name"));
+      o.accountId = KitJson.asString(m.get("accountId"));
+      o.email = KitJson.asString(m.get("email"));
+      o.agentId = KitJson.asString(m.get("agentId"));
+      o.source = KitJson.asString(m.get("source"));
+      o.charged = KitJson.asString(m.get("charged"));
+      return o;
+    }
+
+    Map<String, Object> toMap() {
+      Map<String, Object> m = new LinkedHashMap<>();
+      if (keyId != null) m.put("keyId", keyId);
+      if (name != null) m.put("name", name);
+      if (accountId != null) m.put("accountId", accountId);
+      if (email != null) m.put("email", email);
+      if (agentId != null) m.put("agentId", agentId);
+      if (source != null) m.put("source", source);
+      if (charged != null) m.put("charged", charged);
+      return m;
+    }
+  }
+
   /** What the org has used and has left, at the card's prices. */
   public static final class Usage {
     /** The organization. */
@@ -308,6 +520,15 @@ public final class UsageClient {
 
     /** The spend cap this key's creates are held to: the tightest of its own, those of the keys it was made with, and its holder's grants'. Omitted when none holds it. */
     public KeySpendCap keySpendCap;
+
+    /** With `by=hour`: what each product used each hour, since the month began or 7 days ago, whichever is earlier, oldest first. Only hours that cost something. */
+    public List<UsageHour> hours;
+
+    /** With `by=hour`: what each product's month is made of, a line for each meter it used, its quantity at the card's rate. A product's lines sum to its hours since the month began. */
+    public List<ProductLine> lines;
+
+    /** With `by=key`: what each key's machines and storage used this month, most first. A key the caller may not see is counted under `others`. */
+    public List<KeySpend> keys;
 
     public Usage orgId(String v) {
       this.orgId = v;
@@ -369,6 +590,21 @@ public final class UsageClient {
       return this;
     }
 
+    public Usage hours(List<UsageHour> v) {
+      this.hours = v;
+      return this;
+    }
+
+    public Usage lines(List<ProductLine> v) {
+      this.lines = v;
+      return this;
+    }
+
+    public Usage keys(List<KeySpend> v) {
+      this.keys = v;
+      return this;
+    }
+
     static Usage of(Object raw) {
       Map<String, Object> m = KitJson.object(raw);
       Usage o = new Usage();
@@ -384,6 +620,9 @@ public final class UsageClient {
       o.spendCap = KitJson.asString(m.get("spendCap"));
       o.key = (m.get("key") == null ? null : KeyUsage.of(m.get("key")));
       o.keySpendCap = (m.get("keySpendCap") == null ? null : KeySpendCap.of(m.get("keySpendCap")));
+      o.hours = (m.get("hours") == null ? null : KitJson.array(m.get("hours")).stream().map(UsageHour::of).toList());
+      o.lines = (m.get("lines") == null ? null : KitJson.array(m.get("lines")).stream().map(ProductLine::of).toList());
+      o.keys = (m.get("keys") == null ? null : KitJson.array(m.get("keys")).stream().map(KeySpend::of).toList());
       return o;
     }
 
@@ -401,6 +640,9 @@ public final class UsageClient {
       if (spendCap != null) m.put("spendCap", spendCap);
       if (key != null) m.put("key", key.toMap());
       if (keySpendCap != null) m.put("keySpendCap", keySpendCap.toMap());
+      if (hours != null) m.put("hours", hours.stream().map(i -> i.toMap()).toList());
+      if (lines != null) m.put("lines", lines.stream().map(i -> i.toMap()).toList());
+      if (keys != null) m.put("keys", keys.stream().map(i -> i.toMap()).toList());
       return m;
     }
   }
@@ -413,7 +655,7 @@ public final class UsageClient {
     /** The resource it was used by: a machine, a disk or an address. */
     public String subjectId;
 
-    /** The ID its product names it by (a sandbox's own ID). */
+    /** The ID its product names it by (a machine's own ID). */
     public String resourceId;
 
     /** Its project. */
@@ -638,14 +880,23 @@ public final class UsageClient {
     /** One key's spend too, by its ID: a key the caller may see (its own holder's, or any for an owner or admin); any other is 404. */
     public String key;
 
+    /** Splits too (repeat it for both): `hour`, what each product used each hour (`hours`); `key`, what each key used this month (`keys`). */
+    public List<String> by;
+
     public UsageGetQuery key(String v) {
       this.key = v;
+      return this;
+    }
+
+    public UsageGetQuery by(List<String> v) {
+      this.by = v;
       return this;
     }
 
     Map<String, Object> query() {
       Map<String, Object> q = new LinkedHashMap<>();
       if (key != null) q.put("key", String.valueOf(key));
+      if (by != null) q.put("by", by);
       return q;
     }
   }
@@ -661,7 +912,7 @@ public final class UsageClient {
     /** What the range selects lines by: `hour`, each line's hour's start, or `settled`, its settledAt (its hour's end), of hours that have ended. Ranges by `settled`, each from the last one's end to no later than `finalThrough`, read every line once, final. Default: "hour". */
     public String by;
 
-    /** Only the usage of these resources (repeat it for several, up to 100): each line's `resourceId`, such as a sandbox's ID. */
+    /** Only the usage of these resources (repeat it for several, up to 100): each line's `resourceId`, such as a machine's ID. */
     public List<String> resourceId;
 
     /** Where the page starts: a page's `next`. */

@@ -143,13 +143,13 @@ public final class Jobs {
     /** Which of its org's secrets each run gets; every one whose scope admits it when omitted. */
     public JobSecrets secrets;
 
-    /** Each run's vCPUs. At least 1. Default: 1. */
+    /** Each run's vCPUs; a job's default (1) when omitted. At least 1. */
     public Long vcpu;
 
-    /** Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1. */
+    /** Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1. */
     public Double memoryGB;
 
-    /** Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4. */
+    /** Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1. */
     public Double diskGB;
 
     /** The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. */
@@ -267,13 +267,13 @@ public final class Jobs {
     /** Which of its org's secrets each run gets; every one whose scope admits it when omitted. */
     public JobSecrets secrets;
 
-    /** Each run's vCPUs. At least 1. Default: 1. */
+    /** Each run's vCPUs; a job's default (1) when omitted. At least 1. */
     public Long vcpu;
 
-    /** Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1. */
+    /** Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1. */
     public Double memoryGB;
 
-    /** Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4. */
+    /** Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1. */
     public Double diskGB;
 
     /** The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. */
@@ -475,13 +475,13 @@ public final class Jobs {
     /** Which of its org's secrets each run gets; every one whose scope admits it when omitted. */
     public JobSecrets secrets;
 
-    /** Each run's vCPUs. At least 1. Default: 1. */
+    /** Each run's vCPUs; a job's default (1) when omitted. At least 1. */
     public Long vcpu;
 
-    /** Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1. */
+    /** Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1. */
     public Double memoryGB;
 
-    /** Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4. */
+    /** Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1. */
     public Double diskGB;
 
     /** The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. */
@@ -685,6 +685,32 @@ public final class Jobs {
     }
   }
 
+  /** What get takes in its query. */
+  public static final class JobGetQuery {
+    /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+    public Double wait;
+
+    /** The state the caller last read, which `wait` waits for it to leave. */
+    public String ifState;
+
+    public JobGetQuery wait(Double v) {
+      this.wait = v;
+      return this;
+    }
+
+    public JobGetQuery ifState(String v) {
+      this.ifState = v;
+      return this;
+    }
+
+    Map<String, Object> query() {
+      Map<String, Object> q = new LinkedHashMap<>();
+      if (wait != null) q.put("wait", String.valueOf(wait));
+      if (ifState != null) q.put("ifState", String.valueOf(ifState));
+      return q;
+    }
+  }
+
   /** What list takes in its query. */
   public static final class JobListQuery {
     /** Only those with every label given (repeat it for several): key:value, or a key for any value. */
@@ -726,8 +752,8 @@ public final class Jobs {
   }
 
   /** Returns a job. */
-  public Job get(String id, Transport.RequestOptions opts) {
-    return Job.of(t.request("GET", "/v2/jobs/" + Transport.path(id), null, null, new Transport.Call(true, null), opts));
+  public Job get(String id, JobGetQuery query, Transport.RequestOptions opts) {
+    return Job.of(t.request("GET", "/v2/jobs/" + Transport.path(id), query == null ? null : query.query(), null, new Transport.Call(true, null), opts));
   }
 
   /** Lists the project's jobs, newest first. */

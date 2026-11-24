@@ -7,12 +7,12 @@ A machine that keeps a web app in /app running on port 8080 (its Procfile's `web
 | Default | Value |
 | --- | --- |
 | vCPUs | 2 |
-| Memory | 2 GB |
-| Disk | 4 GB |
+| Memory | 4 GB |
+| Disk | 4 GB, or its image's size when larger |
 | Image | `runtime/standard` |
 | Pauses when idle | Never |
 
-[`POST /v2/apps`](./reference/apps#create-a-app) takes the same [SandboxCreate](./reference/sandboxes#sandboxcreate) as a [sandbox](./sandboxes); every field overrides a default above. An app never pauses, so it is billed for its memory, $0.008 per GB-hour, the whole time it runs.
+[`POST /v2/apps`](./reference/apps#create-a-app) takes the same [SandboxCreate](./reference/sandboxes#sandboxcreate) as a [sandbox](./sandboxes); every field overrides a default above. An app never pauses, so it is billed for its memory, $0.008 per GiB-hour, the whole time it runs.
 
 ## Deploy an app
 

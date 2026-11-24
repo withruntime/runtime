@@ -5,87 +5,87 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # A webhook to make.
-    # - +url+: The https URL to send each event to.
-    # - +events+: The events to send it, at most 32; `["*"]` (every one) when omitted.
-    WebhookCreate = Struct.new(:url, :events, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A webhook to make.
+  # - +url+: The https URL to send each event to.
+  # - +events+: The events to send it, at most 32; `["*"]` (every one) when omitted.
+  WebhookCreate = Struct.new(:url, :events, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          url: h["url"],
-          events: h["events"],
-        )
-      end
-
-      def to_wire
-        {
-          "url" => self.url,
-          "events" => self.events,
-        }.compact
-      end
+      new(
+        url: h["url"],
+        events: h["events"],
+      )
     end
 
-    # A webhook: a signed POST to your URL for each event it names.
-    # - +id+: Its ID.
-    # - +object+: Always `webhook`.
-    # - +url+: The https URL each event is sent to; in a list, its origin alone (`https://host/…`).
-    # - +events+: The events it is sent (`sandbox.created`); `*` for every one.
-    # - +state+: `active` while it is sent to; `deleted` once deleted: a delete's answer.
-    # - +created_at+: When it was made.
-    # - +secret+: Its signing secret (`whsec_...`): returned when it is made, and never again.
-    # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
-    Webhook = Struct.new(:id, :object, :url, :events, :state, :created_at, :secret, :deleted_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "url" => self.url,
+        "events" => self.events,
+      }.compact
+    end
+  end
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          url: h["url"],
-          events: h["events"],
-          state: h["state"],
-          created_at: h["createdAt"],
-          secret: h["secret"],
-          deleted_at: h["deletedAt"],
-        )
-      end
+  # A webhook: a signed POST to your URL for each event it names.
+  # - +id+: Its ID.
+  # - +object+: Always `webhook`.
+  # - +url+: The https URL each event is sent to; in a list, its origin alone (`https://host/…`).
+  # - +events+: The events it is sent (`sandbox.created`); `*` for every one.
+  # - +state+: `active` while it is sent to; `deleted` once deleted: a delete's answer.
+  # - +created_at+: When it was made.
+  # - +secret+: Its signing secret (`whsec_...`): returned when it is made, and never again.
+  # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
+  Webhook = Struct.new(:id, :object, :url, :events, :state, :created_at, :secret, :deleted_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "url" => self.url,
-          "events" => self.events,
-          "state" => self.state,
-          "createdAt" => self.created_at,
-          "secret" => self.secret,
-          "deletedAt" => self.deleted_at,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        object: h["object"],
+        url: h["url"],
+        events: h["events"],
+        state: h["state"],
+        created_at: h["createdAt"],
+        secret: h["secret"],
+        deleted_at: h["deletedAt"],
+      )
     end
 
-    # A signed POST to your URL for each event it names.
-    class Webhooks
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "id" => self.id,
+        "object" => self.object,
+        "url" => self.url,
+        "events" => self.events,
+        "state" => self.state,
+        "createdAt" => self.created_at,
+        "secret" => self.secret,
+        "deletedAt" => self.deleted_at,
+      }.compact
+    end
+  end
 
-      # Makes a webhook, returning its signing secret this once.
-      def create(url:, events: nil, idempotency_key: nil)
-        Webhook.from(@transport.request("POST", "/v2/webhooks", body: { "url" => url, "events" => events }.compact, idempotency_key: idempotency_key))
-      end
+  # A signed POST to your URL for each event it names.
+  class Webhooks
+    attr_reader :transport
 
-      # Lists the org's, oldest first.
-      def list(cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/webhooks", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Webhook.from(i) }
-      end
+    def initialize(transport)
+      @transport = transport
+    end
 
-      # Deletes it: nothing more is sent to it.
-      def delete(id, idempotency_key: nil)
-        Webhook.from(@transport.request("DELETE", "/v2/webhooks/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Makes a webhook, returning its signing secret this once.
+    def create(url:, events: nil, idempotency_key: nil)
+      Webhook.from(@transport.request("POST", "/v2/webhooks", body: { "url" => url, "events" => events }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Lists the org's, oldest first.
+    def list(cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/webhooks", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Webhook.from(i) }
+    end
+
+    # Deletes it: nothing more is sent to it.
+    def delete(id, idempotency_key: nil)
+      Webhook.from(@transport.request("DELETE", "/v2/webhooks/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

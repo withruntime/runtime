@@ -3,1833 +3,2345 @@
 
 require "uri"
 require_relative "runtime"
+require_relative "previews"
 
 module Withruntime
-  module Generated
-    # A command a machine starts at every fresh boot.
-    # - +cmd+: The command: text, run by `bash -lc`, or the program and its arguments as a list, run without a shell.
-    # - +cwd+: The directory it runs in; the user's home when omitted.
-    # - +env+: Environment variables to add.
-    # - +ready_port+: A port it listens on once ready: a create answers once something listens there. At least 1. At most 65535.
-    # - +ready_command+: A shell command that exits 0 once it is ready, run by `/bin/sh -c` in `cwd` until it does: a create answers once it has.
-    # - +ready_timeout_seconds+: How long a create waits for `readyPort` or `readyCommand`, 1 to 300 seconds: 60 when omitted. At least 1. At most 300.
-    MachineStart = Struct.new(:cmd, :cwd, :env, :ready_port, :ready_command, :ready_timeout_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A command a machine starts at every fresh boot.
+  # - +cmd+: The command: text, run by `bash -lc`, or the program and its arguments as a list, run without a shell.
+  # - +cwd+: The directory it runs in; the user's home when omitted.
+  # - +env+: Environment variables to add.
+  # - +ready_port+: A port it listens on once ready: a create answers once something listens there. At least 1. At most 65535.
+  # - +ready_command+: A shell command that exits 0 once it is ready, run by `/bin/sh -c` in `cwd` until it does: a create answers once it has.
+  # - +ready_timeout_seconds+: How long a create waits for `readyPort` or `readyCommand`, 1 to 300 seconds: 60 when omitted. At least 1. At most 300.
+  MachineStart = Struct.new(:cmd, :cwd, :env, :ready_port, :ready_command, :ready_timeout_seconds, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          cmd: h["cmd"],
-          cwd: h["cwd"],
-          env: h["env"],
-          ready_port: h["readyPort"],
-          ready_command: h["readyCommand"],
-          ready_timeout_seconds: h["readyTimeoutSeconds"],
-        )
-      end
-
-      def to_wire
-        {
-          "cmd" => self.cmd,
-          "cwd" => self.cwd,
-          "env" => self.env,
-          "readyPort" => self.ready_port,
-          "readyCommand" => self.ready_command,
-          "readyTimeoutSeconds" => self.ready_timeout_seconds,
-        }.compact
-      end
+      new(
+        cmd: h["cmd"],
+        cwd: h["cwd"],
+        env: h["env"],
+        ready_port: h["readyPort"],
+        ready_command: h["readyCommand"],
+        ready_timeout_seconds: h["readyTimeoutSeconds"],
+      )
     end
 
-    # A volume a machine attaches at its create, mounted read-write in it, one machine at a time; detached when the machine is deleted.
-    # - +volume+: The volume, by name or ID, in the machine's project.
-    # - +path+: Where it is mounted, such as `/data`: an absolute path, not under `/proc`, `/sys`, `/dev`, `/etc`, `/usr`, `/bin`, `/sbin`, `/lib` or `/boot`.
-    VolumeMount = Struct.new(:volume, :path, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "cmd" => self.cmd,
+        "cwd" => self.cwd,
+        "env" => self.env,
+        "readyPort" => self.ready_port,
+        "readyCommand" => self.ready_command,
+        "readyTimeoutSeconds" => self.ready_timeout_seconds,
+      }.compact
+    end
+  end
 
-        new(
-          volume: h["volume"],
-          path: h["path"],
-        )
-      end
+  # A volume a machine attaches at its create, mounted read-write in it, one machine at a time; detached when the machine is deleted.
+  # - +volume+: The volume, by name or ID, in the machine's project.
+  # - +path+: Where it is mounted, such as `/data`: an absolute path, not under `/proc`, `/sys`, `/dev`, `/etc`, `/usr`, `/bin`, `/sbin`, `/lib` or `/boot`.
+  VolumeMount = Struct.new(:volume, :path, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "volume" => self.volume,
-          "path" => self.path,
-        }.compact
-      end
+      new(
+        volume: h["volume"],
+        path: h["path"],
+      )
     end
 
-    # A command a sandbox runs once it starts: when it ends, the sandbox stops.
-    # - +cmd+: The command: text, run by `bash -lc`, or the program and its arguments as a list, run without a shell.
-    # - +cwd+: The directory it runs in; the user's home when omitted.
-    # - +env+: Environment variables to add.
-    # - +timeout_seconds+: Seconds it may run before it is stopped (`1.5` for 1,500 ms); no limit when omitted or 0. At least 0.
-    SandboxRun = Struct.new(:cmd, :cwd, :env, :timeout_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "volume" => self.volume,
+        "path" => self.path,
+      }.compact
+    end
+  end
 
-        new(
-          cmd: h["cmd"],
-          cwd: h["cwd"],
-          env: h["env"],
-          timeout_seconds: h["timeoutSeconds"],
-        )
-      end
+  # A command a machine runs once it starts: when it ends, the machine stops.
+  # - +cmd+: The command: text, run by `bash -lc`, or the program and its arguments as a list, run without a shell.
+  # - +cwd+: The directory it runs in; the user's home when omitted.
+  # - +env+: Environment variables to add.
+  # - +timeout_seconds+: Seconds it may run before it is stopped (`1.5` for 1,500 ms); no limit when omitted or 0. At least 0.
+  SandboxRun = Struct.new(:cmd, :cwd, :env, :timeout_seconds, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "cmd" => self.cmd,
-          "cwd" => self.cwd,
-          "env" => self.env,
-          "timeoutSeconds" => self.timeout_seconds,
-        }.compact
-      end
+      new(
+        cmd: h["cmd"],
+        cwd: h["cwd"],
+        env: h["env"],
+        timeout_seconds: h["timeoutSeconds"],
+      )
     end
 
-    # Where a sandbox may connect out, past the walls every machine has.
-    # - +allow_outbound+: The only places it may reach, each a host, `*.` and a name for every name under it, an address or a CIDR (`[` and `]` around an IPv6 address), every port when it names none; `:port` for that port alone, on a host name for a port beyond 80 and 443, which go together. `*` is every public host. Every public host when omitted; nothing when empty.
-    # - +deny_outbound+: Places it may never reach, written as in allowOutbound with no port: a deny wins over every allow.
-    NetworkRules = Struct.new(:allow_outbound, :deny_outbound, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "cmd" => self.cmd,
+        "cwd" => self.cwd,
+        "env" => self.env,
+        "timeoutSeconds" => self.timeout_seconds,
+      }.compact
+    end
+  end
 
-        new(
-          allow_outbound: h["allowOutbound"],
-          deny_outbound: h["denyOutbound"],
-        )
-      end
+  # Where a machine may connect out, past the walls every machine has.
+  # - +allow_outbound+: The only places it may reach, each a host, `*.` and a name for every name under it, an address or a CIDR (`[` and `]` around an IPv6 address), every port when it names none; `:port` for that port alone, on a host name for a port beyond 80 and 443, which go together. `*` is every public host. Every public host when omitted; nothing when empty.
+  # - +deny_outbound+: Places it may never reach, written as in allowOutbound with no port: a deny wins over every allow.
+  NetworkRules = Struct.new(:allow_outbound, :deny_outbound, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "allowOutbound" => self.allow_outbound,
-          "denyOutbound" => self.deny_outbound,
-        }.compact
-      end
+      new(
+        allow_outbound: h["allowOutbound"],
+        deny_outbound: h["denyOutbound"],
+      )
     end
 
-    # A sandbox's settings: what a create sets on its machine.
-    # - +vcpu+: Its vCPUs. At least 1. Default: 2.
-    # - +memory_gb+: Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4.
-    # - +disk_gb+: Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4.
-    # - +image+: The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
-    # - +secrets+: The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. At most 64 items.
-    # - +start+: The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted.
-    # - +user+: Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
-    SandboxSettings = Struct.new(:vcpu, :memory_gb, :disk_gb, :image, :secrets, :start, :user, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "allowOutbound" => self.allow_outbound,
+        "denyOutbound" => self.deny_outbound,
+      }.compact
+    end
+  end
 
-        new(
-          vcpu: h["vcpu"],
-          memory_gb: h["memoryGB"],
-          disk_gb: h["diskGB"],
-          image: h["image"],
-          secrets: h["secrets"],
-          start: MachineStart.from(h["start"]),
-          user: h["user"],
-        )
-      end
+  # A machine's settings: what a create sets on it.
+  # - +vcpu+: Its vCPUs; its product's default when omitted. At least 1.
+  # - +memory_gb+: Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1.
+  # - +disk_gb+: Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1.
+  # - +image+: The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
+  # - +secrets+: The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. At most 64 items.
+  # - +start+: The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted.
+  # - +user+: Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
+  SandboxSettings = Struct.new(:vcpu, :memory_gb, :disk_gb, :image, :secrets, :start, :user, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "vcpu" => self.vcpu,
-          "memoryGB" => self.memory_gb,
-          "diskGB" => self.disk_gb,
-          "image" => self.image,
-          "secrets" => self.secrets,
-          "start" => self.start&.to_wire,
-          "user" => self.user,
-        }.compact
-      end
+      new(
+        vcpu: h["vcpu"],
+        memory_gb: h["memoryGB"],
+        disk_gb: h["diskGB"],
+        image: h["image"],
+        secrets: h["secrets"],
+        start: MachineStart.from(h["start"]),
+        user: h["user"],
+      )
     end
 
-    # A sandbox to create.
-    # - +vcpu+: Its vCPUs. At least 1. Default: 2.
-    # - +memory_gb+: Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4.
-    # - +disk_gb+: Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4.
-    # - +image+: The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
-    # - +secrets+: The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. At most 64 items.
-    # - +start+: The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted.
-    # - +user+: Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
-    # - +volumes+: Volumes it attaches and mounts at its create, at most one; detached when it is deleted, to attach to another.
-    # - +run+: A command it runs once it starts. When the command ends, the sandbox is `paused` with its disk kept (exitCode says how it ended) and a call starts it again. Needs the `exec` permission too.
-    # - +name+: Its name, unique in its project.
-    # - +labels+: Labels to find it by.
-    # - +get_or_create+: With a name: the sandbox of that name when there is one, else a new one.
-    # - +max_cost+: The most it may cost in all, in US dollars (`"5.00"`): once it has cost that it pauses, and starts again only once its maxCost is raised (`update`); what a key's per-request and spend caps count. When omitted under a key with a per-request or spend cap, the most that key's caps leave.
-    # - +idle_pause_seconds+: Seconds with nothing happening before it pauses, 60 to 86400; 0 never; 300 when omitted. A fork keeps its source's, except 0: a copy never pauses only when its fork asks. At least 0. At most 86400.
-    # - +snapshot+: A snapshot it starts as: a copy of it running, at its sizes, in its project, with its secrets.
-    # - +network+: Where it may connect out from its first start, as setNetwork takes it; the open internet behind every machine's walls when omitted.
-    # - +env+: Environment variables for every command and process in it and its start, at most 32 and 32768 bytes of names and values; values are never answered. A copy keeps them.
-    SandboxCreate = Struct.new(:vcpu, :memory_gb, :disk_gb, :image, :secrets, :start, :user, :volumes, :run, :name, :labels, :get_or_create, :max_cost, :idle_pause_seconds, :snapshot, :network, :env, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "vcpu" => self.vcpu,
+        "memoryGB" => self.memory_gb,
+        "diskGB" => self.disk_gb,
+        "image" => self.image,
+        "secrets" => self.secrets,
+        "start" => self.start&.to_wire,
+        "user" => self.user,
+      }.compact
+    end
+  end
 
-        new(
-          vcpu: h["vcpu"],
-          memory_gb: h["memoryGB"],
-          disk_gb: h["diskGB"],
-          image: h["image"],
-          secrets: h["secrets"],
-          start: MachineStart.from(h["start"]),
-          user: h["user"],
-          volumes: h["volumes"]&.map { |i| VolumeMount.from(i) },
-          run: SandboxRun.from(h["run"]),
-          name: h["name"],
-          labels: h["labels"],
-          get_or_create: h["getOrCreate"],
-          max_cost: h["maxCost"],
-          idle_pause_seconds: h["idlePauseSeconds"],
-          snapshot: h["snapshot"],
-          network: NetworkRules.from(h["network"]),
-          env: h["env"],
-        )
-      end
+  # A machine to create.
+  # - +vcpu+: Its vCPUs; its product's default when omitted. At least 1.
+  # - +memory_gb+: Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1.
+  # - +disk_gb+: Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1.
+  # - +image+: The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
+  # - +secrets+: The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. At most 64 items.
+  # - +start+: The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted.
+  # - +user+: Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
+  # - +volumes+: Volumes it attaches and mounts at its create, at most one; detached when it is deleted, to attach to another.
+  # - +run+: A command it runs once it starts. When the command ends, the machine is `paused` with its disk kept (exitCode says how it ended) and a call starts it again. Needs the `exec` permission too.
+  # - +name+: Its name, unique in its project.
+  # - +labels+: Labels to find it by.
+  # - +get_or_create+: With a name: the machine of that name when there is one, else a new one.
+  # - +max_cost+: The most it may cost in all, in US dollars (`"5.00"`): once it has cost that it pauses, and starts again only once its maxCost is raised (`update`); what a key's per-request and spend caps count. When omitted under a key with a per-request or spend cap, the most that key's caps leave.
+  # - +idle_pause_seconds+: Seconds with nothing happening before it pauses, 60 to 86400; 0 never; its product's default when omitted (300 for a sandbox). A fork keeps its source's, except 0: a copy never pauses only when its fork asks. At least 0. At most 86400.
+  # - +from+: What it starts as, by ID or name: a snapshot (a copy of it running, at its sizes, in its project, with its secrets) or an image (as `image` takes it). A name is a snapshot's when the project has one of that name, else an image's. Not with `image`. Running copies of a sandbox are `fork`'s.
+  # - +snapshot+: Deprecated: SDK 1.0.x's name for `from` with a snapshot, read as `from` ([`snapshot_is_from`]). Not with `from`.
+  # - +network+: Where it may connect out from its first start, as setNetwork takes it; the open internet behind every machine's walls when omitted.
+  # - +env+: Environment variables for every command and process in it and its start, at most 32 and 32768 bytes of names and values; values are never answered. A copy keeps them.
+  # - +auto_wake+: Whether a call that reaches it paused (an exec, a file, a terminal, a preview's visitor) resumes it; true when omitted. false: such a call answers 409 sandbox_paused and it stays paused until its own `:resume`. A fork's copies keep it.
+  # - +delete_after_seconds+: Seconds until Runtime deletes it, as its delete does: final at once, its memory and disk gone and no longer billed; it can't be undone. 0 or omitted: kept until deleted. Its owner renews it with update; a copy, snapshot or image made from it sets its own. At least 0. At most 315360000.
+  # - +delete_protection+: Whether its delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`. While true, its time limit pauses it instead of deleting it; only its organization's close deletes it. A copy, snapshot or image made from it sets its own.
+  SandboxCreate = Struct.new(:vcpu, :memory_gb, :disk_gb, :image, :secrets, :start, :user, :volumes, :run, :name, :labels, :get_or_create, :max_cost, :idle_pause_seconds, :from, :snapshot, :network, :env, :auto_wake, :delete_after_seconds, :delete_protection, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "vcpu" => self.vcpu,
-          "memoryGB" => self.memory_gb,
-          "diskGB" => self.disk_gb,
-          "image" => self.image,
-          "secrets" => self.secrets,
-          "start" => self.start&.to_wire,
-          "user" => self.user,
-          "volumes" => self.volumes&.map { |i| i&.to_wire },
-          "run" => self.run&.to_wire,
-          "name" => self.name,
-          "labels" => self.labels,
-          "getOrCreate" => self.get_or_create,
-          "maxCost" => self.max_cost,
-          "idlePauseSeconds" => self.idle_pause_seconds,
-          "snapshot" => self.snapshot,
-          "network" => self.network&.to_wire,
-          "env" => self.env,
-        }.compact
-      end
+      new(
+        vcpu: h["vcpu"],
+        memory_gb: h["memoryGB"],
+        disk_gb: h["diskGB"],
+        image: h["image"],
+        secrets: h["secrets"],
+        start: MachineStart.from(h["start"]),
+        user: h["user"],
+        volumes: h["volumes"]&.map { |i| VolumeMount.from(i) },
+        run: SandboxRun.from(h["run"]),
+        name: h["name"],
+        labels: h["labels"],
+        get_or_create: h["getOrCreate"],
+        max_cost: h["maxCost"],
+        idle_pause_seconds: h["idlePauseSeconds"],
+        from: h["from"],
+        snapshot: h["snapshot"],
+        network: NetworkRules.from(h["network"]),
+        env: h["env"],
+        auto_wake: h["autoWake"],
+        delete_after_seconds: h["deleteAfterSeconds"],
+        delete_protection: h["deleteProtection"],
+      )
     end
 
-    # How a create's wait for its start's ready check (`start.readyPort`, `start.readyCommand`) went.
-    # - +state+: `ready` (the check passed), `timeout` (not within `readyTimeoutSeconds`), or `not_running` (it never ran).
-    # - +waited_ms+: How long it waited, in milliseconds.
-    MachineReady = Struct.new(:state, :waited_ms, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "vcpu" => self.vcpu,
+        "memoryGB" => self.memory_gb,
+        "diskGB" => self.disk_gb,
+        "image" => self.image,
+        "secrets" => self.secrets,
+        "start" => self.start&.to_wire,
+        "user" => self.user,
+        "volumes" => self.volumes&.map { |i| i&.to_wire },
+        "run" => self.run&.to_wire,
+        "name" => self.name,
+        "labels" => self.labels,
+        "getOrCreate" => self.get_or_create,
+        "maxCost" => self.max_cost,
+        "idlePauseSeconds" => self.idle_pause_seconds,
+        "from" => self.from,
+        "snapshot" => self.snapshot,
+        "network" => self.network&.to_wire,
+        "env" => self.env,
+        "autoWake" => self.auto_wake,
+        "deleteAfterSeconds" => self.delete_after_seconds,
+        "deleteProtection" => self.delete_protection,
+      }.compact
+    end
+  end
 
-        new(
-          state: h["state"],
-          waited_ms: h["waitedMs"],
-        )
-      end
+  # How a create's wait for its start's ready check (`start.readyPort`, `start.readyCommand`) went.
+  # - +state+: `ready` (the check passed), `timeout` (not within `readyTimeoutSeconds`), or `not_running` (it never ran).
+  # - +waited_ms+: How long it waited, in milliseconds.
+  MachineReady = Struct.new(:state, :waited_ms, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "state" => self.state,
-          "waitedMs" => self.waited_ms,
-        }.compact
-      end
+      new(
+        state: h["state"],
+        waited_ms: h["waitedMs"],
+      )
     end
 
-    # A sandbox.
-    # - +vcpu+: Its vCPUs. At least 1. Default: 2.
-    # - +memory_gb+: Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4.
-    # - +disk_gb+: Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4.
-    # - +image+: The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
-    # - +secrets+: The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. At most 64 items.
-    # - +start+: The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted.
-    # - +user+: Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
-    # - +id+: Its ID.
-    # - +object+: Always `sandbox`.
-    # - +name+: Its name, unique in its project.
-    # - +state+: Where it is.
-    # - +labels+: Its labels.
-    # - +created_at+: When it was created.
-    # - +deleted_at+: When it was deleted: a delete's answer alone.
-    # - +revision+: Its revision, changed by every change to it: what an update's If-Match names.
-    # - +idle_pause_seconds+: Seconds with nothing happening before it pauses; 0 never. Default: 300.
-    # - +max_cost+: The most it may cost in all, in US dollars; none when it has no such cap.
-    # - +exit_code+: Its run's exit code, once its run ended; none for one a signal or its timeout ended.
-    # - +ended_at+: When its run ended.
-    # - +ready+: A create's answer alone, for a start with a ready check: how its wait went.
-    Sandbox = Struct.new(:vcpu, :memory_gb, :disk_gb, :image, :secrets, :start, :user, :id, :object, :name, :state, :labels, :created_at, :deleted_at, :revision, :idle_pause_seconds, :max_cost, :exit_code, :ended_at, :ready, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "state" => self.state,
+        "waitedMs" => self.waited_ms,
+      }.compact
+    end
+  end
 
-        new(
-          vcpu: h["vcpu"],
-          memory_gb: h["memoryGB"],
-          disk_gb: h["diskGB"],
-          image: h["image"],
-          secrets: h["secrets"],
-          start: MachineStart.from(h["start"]),
-          user: h["user"],
-          id: h["id"],
-          object: h["object"],
-          name: h["name"],
-          state: h["state"],
-          labels: h["labels"],
-          created_at: h["createdAt"],
-          deleted_at: h["deletedAt"],
-          revision: h["revision"],
-          idle_pause_seconds: h["idlePauseSeconds"],
-          max_cost: h["maxCost"],
-          exit_code: h["exitCode"],
-          ended_at: h["endedAt"],
-          ready: MachineReady.from(h["ready"]),
-        )
-      end
+  # A machine.
+  # - +vcpu+: Its vCPUs; its product's default when omitted. At least 1.
+  # - +memory_gb+: Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1.
+  # - +disk_gb+: Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1.
+  # - +image+: The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
+  # - +secrets+: The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. At most 64 items.
+  # - +start+: The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted.
+  # - +user+: Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
+  # - +id+: Its ID.
+  # - +object+: Its product's kind: `sandbox` for a sandbox, `app` for an app, and so on.
+  # - +name+: Its name, unique in its project.
+  # - +state+: Where it is.
+  # - +labels+: Its labels.
+  # - +created_at+: When it was created.
+  # - +deleted_at+: When it was deleted: a delete's answer alone.
+  # - +revision+: Its revision, changed by every change to it: what an update's If-Match names.
+  # - +idle_pause_seconds+: Seconds with nothing happening before it pauses; 0 never. Default: 300.
+  # - +max_cost+: The most it may cost in all, in US dollars; none when it has no such cap.
+  # - +auto_wake+: Whether a call that reaches it paused resumes it; false: only its own resume does, and such a call answers 409 sandbox_paused. Default: true.
+  # - +exit_code+: Its run's exit code, once its run ended; none for one a signal or its timeout ended.
+  # - +ended_at+: When its run ended.
+  # - +paused_at+: When its pause began (or its run ended), while it is paused.
+  # - +ready+: A create's answer alone, for a start with a ready check: how its wait went.
+  # - +delete_at+: When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted.
+  # - +delete_protection+: Whether its delete is refused (409 `delete_protected`) until an update turns this off.
+  SandboxInfo = Struct.new(:vcpu, :memory_gb, :disk_gb, :image, :secrets, :start, :user, :id, :object, :name, :state, :labels, :created_at, :deleted_at, :revision, :idle_pause_seconds, :max_cost, :auto_wake, :exit_code, :ended_at, :paused_at, :ready, :delete_at, :delete_protection, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "vcpu" => self.vcpu,
-          "memoryGB" => self.memory_gb,
-          "diskGB" => self.disk_gb,
-          "image" => self.image,
-          "secrets" => self.secrets,
-          "start" => self.start&.to_wire,
-          "user" => self.user,
-          "id" => self.id,
-          "object" => self.object,
-          "name" => self.name,
-          "state" => self.state,
-          "labels" => self.labels,
-          "createdAt" => self.created_at,
-          "deletedAt" => self.deleted_at,
-          "revision" => self.revision,
-          "idlePauseSeconds" => self.idle_pause_seconds,
-          "maxCost" => self.max_cost,
-          "exitCode" => self.exit_code,
-          "endedAt" => self.ended_at,
-          "ready" => self.ready&.to_wire,
-        }.compact
-      end
+      new(
+        vcpu: h["vcpu"],
+        memory_gb: h["memoryGB"],
+        disk_gb: h["diskGB"],
+        image: h["image"],
+        secrets: h["secrets"],
+        start: MachineStart.from(h["start"]),
+        user: h["user"],
+        id: h["id"],
+        object: h["object"],
+        name: h["name"],
+        state: h["state"],
+        labels: h["labels"],
+        created_at: h["createdAt"],
+        deleted_at: h["deletedAt"],
+        revision: h["revision"],
+        idle_pause_seconds: h["idlePauseSeconds"],
+        max_cost: h["maxCost"],
+        auto_wake: h["autoWake"],
+        exit_code: h["exitCode"],
+        ended_at: h["endedAt"],
+        paused_at: h["pausedAt"],
+        ready: MachineReady.from(h["ready"]),
+        delete_at: h["deleteAt"],
+        delete_protection: h["deleteProtection"],
+      )
     end
 
-    # A terminal's size.
-    # - +cols+: Its columns. At least 1. At most 65535.
-    # - +rows+: Its rows. At least 1. At most 65535.
-    Terminal = Struct.new(:cols, :rows, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "vcpu" => self.vcpu,
+        "memoryGB" => self.memory_gb,
+        "diskGB" => self.disk_gb,
+        "image" => self.image,
+        "secrets" => self.secrets,
+        "start" => self.start&.to_wire,
+        "user" => self.user,
+        "id" => self.id,
+        "object" => self.object,
+        "name" => self.name,
+        "state" => self.state,
+        "labels" => self.labels,
+        "createdAt" => self.created_at,
+        "deletedAt" => self.deleted_at,
+        "revision" => self.revision,
+        "idlePauseSeconds" => self.idle_pause_seconds,
+        "maxCost" => self.max_cost,
+        "autoWake" => self.auto_wake,
+        "exitCode" => self.exit_code,
+        "endedAt" => self.ended_at,
+        "pausedAt" => self.paused_at,
+        "ready" => self.ready&.to_wire,
+        "deleteAt" => self.delete_at,
+        "deleteProtection" => self.delete_protection,
+      }.compact
+    end
+  end
 
-        new(
-          cols: h["cols"],
-          rows: h["rows"],
-        )
-      end
+  # A terminal's size.
+  # - +cols+: Its columns. At least 1. At most 65535.
+  # - +rows+: Its rows. At least 1. At most 65535.
+  Terminal = Struct.new(:cols, :rows, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "cols" => self.cols,
-          "rows" => self.rows,
-        }.compact
-      end
+      new(
+        cols: h["cols"],
+        rows: h["rows"],
+      )
     end
 
-    # A command to run: to its end, or started and answered at once (`wait: false`).
-    # - +cmd+: The command: text, run by `bash -lc` (`"npm test"`), or a list, the program and its arguments run without a shell (`["npm", "test"]`).
-    # - +cwd+: The directory it runs in; the user's home when omitted.
-    # - +env+: Environment variables to add.
-    # - +stdin+: Bytes sent to its standard input.
-    # - +timeout_seconds+: Seconds it may run before it is stopped (`1.5` for 1,500 ms); it runs to its end when omitted or 0. At least 0.
-    # - +stream+: Answer as NDJSON events while it runs (start, stdout, stderr, exit), as `Accept: application/x-ndjson` does.
-    # - +wait+: Wait for it to end and return it with its output. False returns it at once, running: read its output with processes.output, send it input with processes.write and signals with processes.signal. Default: true.
-    # - +stdin_open+: Keep its standard input open for processes.write; not with stdin, and not with a wait for its end.
-    # - +output_encoding+: How processes.output answers its output. Default: "utf8".
-    # - +pty+: Run it on a terminal of this size: its input, output and controlling terminal; not with a wait for its end.
-    # - +user+: Who it runs as: `runtime` (uid 1000, with passwordless sudo) or `root`; the sandbox's `user` when omitted.
-    ExecRequest = Struct.new(:cmd, :cwd, :env, :stdin, :timeout_seconds, :stream, :wait, :stdin_open, :output_encoding, :pty, :user, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "cols" => self.cols,
+        "rows" => self.rows,
+      }.compact
+    end
+  end
 
-        new(
-          cmd: h["cmd"],
-          cwd: h["cwd"],
-          env: h["env"],
-          stdin: h["stdin"],
-          timeout_seconds: h["timeoutSeconds"],
-          stream: h["stream"],
-          wait: h["wait"],
-          stdin_open: h["stdinOpen"],
-          output_encoding: h["outputEncoding"],
-          pty: Terminal.from(h["pty"]),
-          user: h["user"],
-        )
-      end
+  # A command to run: to its end, or started and answered at once (`wait: false`).
+  # - +cmd+: The command: text, run by `bash -lc` (`"npm test"`), or a list, the program and its arguments run without a shell (`["npm", "test"]`).
+  # - +cwd+: The directory it runs in; the user's home when omitted.
+  # - +env+: Environment variables to add.
+  # - +stdin+: Bytes sent to its standard input.
+  # - +timeout_seconds+: Seconds it may run before it is stopped (`1.5` for 1,500 ms); it runs to its end when omitted or 0. At least 0.
+  # - +stream+: Answer as NDJSON events while it runs (start, stdout, stderr, exit), as `Accept: application/x-ndjson` does.
+  # - +wait+: Wait for it to end and return it with its output. False returns it at once, running: read its output with processes.output, send it input with processes.write and signals with processes.signal. Default: true.
+  # - +stdin_open+: Keep its standard input open for processes.write; not with stdin, and not with a wait for its end.
+  # - +output_encoding+: How processes.output answers its output. Default: "utf8".
+  # - +pty+: Run it on a terminal of this size: its input, output and controlling terminal; not with a wait for its end.
+  # - +user+: Who it runs as: `runtime` (uid 1000, with passwordless sudo) or `root`; the machine's `user` when omitted.
+  ExecRequest = Struct.new(:cmd, :cwd, :env, :stdin, :timeout_seconds, :stream, :wait, :stdin_open, :output_encoding, :pty, :user, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "cmd" => self.cmd,
-          "cwd" => self.cwd,
-          "env" => self.env,
-          "stdin" => self.stdin,
-          "timeoutSeconds" => self.timeout_seconds,
-          "stream" => self.stream,
-          "wait" => self.wait,
-          "stdinOpen" => self.stdin_open,
-          "outputEncoding" => self.output_encoding,
-          "pty" => self.pty&.to_wire,
-          "user" => self.user,
-        }.compact
-      end
+      new(
+        cmd: h["cmd"],
+        cwd: h["cwd"],
+        env: h["env"],
+        stdin: h["stdin"],
+        timeout_seconds: h["timeoutSeconds"],
+        stream: h["stream"],
+        wait: h["wait"],
+        stdin_open: h["stdinOpen"],
+        output_encoding: h["outputEncoding"],
+        pty: Terminal.from(h["pty"]),
+        user: h["user"],
+      )
     end
 
-    # A process.
-    # - +id+: Its ID.
-    # - +object+: Always `process`.
-    # - +state+: Where it is.
-    # - +exit_code+: Its exit code once it exited; negative when a signal ended it.
-    # - +command+: The command it runs.
-    # - +cwd+: The directory it runs in.
-    # - +pty+: It runs on a terminal.
-    # - +stdin_open+: Its standard input is open for processes.write.
-    # - +stdin_offset+: Bytes of input it has taken.
-    # - +output_encoding+: How its output is answered.
-    # - +started_at+: When it started.
-    # - +ended_at+: When it ended.
-    # - +timeout_seconds+: Seconds it may run before it is killed.
-    # - +output_bytes+: Bytes of output it has written: the cursor past its last.
-    # - +first_offset+: The oldest byte of its output still kept.
-    # - +stdout+: What it wrote to standard output, as UTF-8: given once an exec waited for its end.
-    # - +stderr+: What it wrote to standard error, as UTF-8: given once an exec waited for its end.
-    # - +stdout_truncated+: stdout holds only part of what it wrote (its first 1 MiB).
-    # - +stderr_truncated+: stderr holds only part of what it wrote (its first 1 MiB).
-    # - +duration_seconds+: How long it ran, in seconds, to the millisecond, once it ended.
-    Process = Struct.new(:id, :object, :state, :exit_code, :command, :cwd, :pty, :stdin_open, :stdin_offset, :output_encoding, :started_at, :ended_at, :timeout_seconds, :output_bytes, :first_offset, :stdout, :stderr, :stdout_truncated, :stderr_truncated, :duration_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "cmd" => self.cmd,
+        "cwd" => self.cwd,
+        "env" => self.env,
+        "stdin" => self.stdin,
+        "timeoutSeconds" => self.timeout_seconds,
+        "stream" => self.stream,
+        "wait" => self.wait,
+        "stdinOpen" => self.stdin_open,
+        "outputEncoding" => self.output_encoding,
+        "pty" => self.pty&.to_wire,
+        "user" => self.user,
+      }.compact
+    end
+  end
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          state: h["state"],
-          exit_code: h["exitCode"],
-          command: h["command"],
-          cwd: h["cwd"],
-          pty: h["pty"],
-          stdin_open: h["stdinOpen"],
-          stdin_offset: h["stdinOffset"],
-          output_encoding: h["outputEncoding"],
-          started_at: h["startedAt"],
-          ended_at: h["endedAt"],
-          timeout_seconds: h["timeoutSeconds"],
-          output_bytes: h["outputBytes"],
-          first_offset: h["firstOffset"],
-          stdout: h["stdout"],
-          stderr: h["stderr"],
-          stdout_truncated: h["stdoutTruncated"],
-          stderr_truncated: h["stderrTruncated"],
-          duration_seconds: h["durationSeconds"],
-        )
-      end
+  # A process.
+  # - +id+: Its ID.
+  # - +object+: Always `process`.
+  # - +state+: Where it is.
+  # - +exit_code+: Its exit code once it exited; negative when a signal ended it.
+  # - +command+: The command it runs.
+  # - +cwd+: The directory it runs in.
+  # - +pty+: It runs on a terminal.
+  # - +stdin_open+: Its standard input is open for processes.write.
+  # - +stdin_offset+: Bytes of input it has taken.
+  # - +output_encoding+: How its output is answered.
+  # - +started_at+: When it started.
+  # - +ended_at+: When it ended.
+  # - +timeout_seconds+: Seconds it may run before it is killed.
+  # - +output_bytes+: Bytes of output it has written: the cursor past its last.
+  # - +first_offset+: The oldest byte of its output still kept.
+  # - +stdout+: What it wrote to standard output, as UTF-8: given once an exec waited for its end.
+  # - +stderr+: What it wrote to standard error, as UTF-8: given once an exec waited for its end.
+  # - +stdout_truncated+: stdout holds only part of what it wrote (its first 1 MiB).
+  # - +stderr_truncated+: stderr holds only part of what it wrote (its first 1 MiB).
+  # - +duration_seconds+: How long it ran, in seconds, to the millisecond, once it ended.
+  Process = Struct.new(:id, :object, :state, :exit_code, :command, :cwd, :pty, :stdin_open, :stdin_offset, :output_encoding, :started_at, :ended_at, :timeout_seconds, :output_bytes, :first_offset, :stdout, :stderr, :stdout_truncated, :stderr_truncated, :duration_seconds, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "state" => self.state,
-          "exitCode" => self.exit_code,
-          "command" => self.command,
-          "cwd" => self.cwd,
-          "pty" => self.pty,
-          "stdinOpen" => self.stdin_open,
-          "stdinOffset" => self.stdin_offset,
-          "outputEncoding" => self.output_encoding,
-          "startedAt" => self.started_at,
-          "endedAt" => self.ended_at,
-          "timeoutSeconds" => self.timeout_seconds,
-          "outputBytes" => self.output_bytes,
-          "firstOffset" => self.first_offset,
-          "stdout" => self.stdout,
-          "stderr" => self.stderr,
-          "stdoutTruncated" => self.stdout_truncated,
-          "stderrTruncated" => self.stderr_truncated,
-          "durationSeconds" => self.duration_seconds,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        object: h["object"],
+        state: h["state"],
+        exit_code: h["exitCode"],
+        command: h["command"],
+        cwd: h["cwd"],
+        pty: h["pty"],
+        stdin_open: h["stdinOpen"],
+        stdin_offset: h["stdinOffset"],
+        output_encoding: h["outputEncoding"],
+        started_at: h["startedAt"],
+        ended_at: h["endedAt"],
+        timeout_seconds: h["timeoutSeconds"],
+        output_bytes: h["outputBytes"],
+        first_offset: h["firstOffset"],
+        stdout: h["stdout"],
+        stderr: h["stderr"],
+        stdout_truncated: h["stdoutTruncated"],
+        stderr_truncated: h["stderrTruncated"],
+        duration_seconds: h["durationSeconds"],
+      )
     end
 
-    # A file written.
-    # - +path+: Its path.
-    # - +size+: Its size in bytes, after the write.
-    # - +sha256+: Its SHA-256 in hex: given for a file written whole.
-    # - +offset+: Where the bytes were written: given for a write at an offset.
-    FileWritten = Struct.new(:path, :size, :sha256, :offset, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "id" => self.id,
+        "object" => self.object,
+        "state" => self.state,
+        "exitCode" => self.exit_code,
+        "command" => self.command,
+        "cwd" => self.cwd,
+        "pty" => self.pty,
+        "stdinOpen" => self.stdin_open,
+        "stdinOffset" => self.stdin_offset,
+        "outputEncoding" => self.output_encoding,
+        "startedAt" => self.started_at,
+        "endedAt" => self.ended_at,
+        "timeoutSeconds" => self.timeout_seconds,
+        "outputBytes" => self.output_bytes,
+        "firstOffset" => self.first_offset,
+        "stdout" => self.stdout,
+        "stderr" => self.stderr,
+        "stdoutTruncated" => self.stdout_truncated,
+        "stderrTruncated" => self.stderr_truncated,
+        "durationSeconds" => self.duration_seconds,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          size: h["size"],
-          sha256: h["sha256"],
-          offset: h["offset"],
-        )
-      end
+  # A failed read of an exec's events: the error the API would have answered, and where to follow on from.
+  # - +code+: The error's code.
+  # - +message+: What went wrong.
+  # - +status+: The status the API answered.
+  # - +process_id+: The process.
+  # - +cursor+: The cursor to follow its output on from (processes.output).
+  ExecEventError = Struct.new(:code, :message, :status, :process_id, :cursor, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "size" => self.size,
-          "sha256" => self.sha256,
-          "offset" => self.offset,
-        }.compact
-      end
+      new(
+        code: h["code"],
+        message: h["message"],
+        status: h["status"],
+        process_id: h["processId"],
+        cursor: h["cursor"],
+      )
     end
 
-    # Some of a process's output.
-    # - +offset+: Where it starts in the process's output.
-    # - +stream+: The stream it was written to.
-    # - +text+: It, as text.
-    # - +base64+: It, as bytes, when the process answers base64.
-    OutputChunk = Struct.new(:offset, :stream, :text, :base64, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "code" => self.code,
+        "message" => self.message,
+        "status" => self.status,
+        "processId" => self.process_id,
+        "cursor" => self.cursor,
+      }.compact
+    end
+  end
 
-        new(
-          offset: h["offset"],
-          stream: h["stream"],
-          text: h["text"],
-          base64: h["base64"],
-        )
-      end
+  # One event of an exec asked for its events (`stream: true`, or `Accept: application/x-ndjson`), one JSON object a line: `start`, then `stdout` and `stderr` as the output comes, `truncated` when output was dropped before it was read, and `exit`; or `continue` (follow on with processes.output from `cursor`) or `error`.
+  # - +type+: `start`, `stdout`, `stderr`, `truncated`, `exit`, `continue` or `error`.
+  # - +process_id+: The process: `start` and `continue`.
+  # - +replayed+: `start`: this Idempotency-Key ran it before, and these are that run's events again.
+  # - +data+: `stdout` and `stderr`: the output, as text.
+  # - +base64+: `stdout` and `stderr`: the output's bytes, in base64, with outputEncoding `base64`.
+  # - +offset+: `stdout` and `stderr`: where in the process's output these bytes start.
+  # - +dropped_bytes+: `truncated`: how many bytes were dropped.
+  # - +resume_at+: `truncated`: where the output read on from.
+  # - +exit_code+: `exit`: its exit code.
+  # - +state+: `exit`: how it ended.
+  # - +timed_out+: `exit`: it was stopped at its timeout.
+  # - +duration_seconds+: `exit`: how long it ran.
+  # - +cursor+: `continue`: the cursor to follow its output on from (processes.output).
+  # - +error+: `error`: what failed.
+  ExecEvent = Struct.new(:type, :process_id, :replayed, :data, :base64, :offset, :dropped_bytes, :resume_at, :exit_code, :state, :timed_out, :duration_seconds, :cursor, :error, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "offset" => self.offset,
-          "stream" => self.stream,
-          "text" => self.text,
-          "base64" => self.base64,
-        }.compact
-      end
+      new(
+        type: h["type"],
+        process_id: h["processId"],
+        replayed: h["replayed"],
+        data: h["data"],
+        base64: h["base64"],
+        offset: h["offset"],
+        dropped_bytes: h["droppedBytes"],
+        resume_at: h["resumeAt"],
+        exit_code: h["exitCode"],
+        state: h["state"],
+        timed_out: h["timedOut"],
+        duration_seconds: h["durationSeconds"],
+        cursor: h["cursor"],
+        error: ExecEventError.from(h["error"]),
+      )
     end
 
-    # A process's output after a cursor.
-    # - +chunks+: The output, in the order it was written.
-    # - +next_cursor+: The cursor to read on from.
-    # - +truncated+: Output past the cursor was dropped before it was read.
-    # - +dropped_bytes+: How many bytes were dropped.
-    # - +process+: The process.
-    ProcessOutput = Struct.new(:chunks, :next_cursor, :truncated, :dropped_bytes, :process, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "type" => self.type,
+        "processId" => self.process_id,
+        "replayed" => self.replayed,
+        "data" => self.data,
+        "base64" => self.base64,
+        "offset" => self.offset,
+        "droppedBytes" => self.dropped_bytes,
+        "resumeAt" => self.resume_at,
+        "exitCode" => self.exit_code,
+        "state" => self.state,
+        "timedOut" => self.timed_out,
+        "durationSeconds" => self.duration_seconds,
+        "cursor" => self.cursor,
+        "error" => self.error&.to_wire,
+      }.compact
+    end
+  end
 
-        new(
-          chunks: h["chunks"]&.map { |i| OutputChunk.from(i) },
-          next_cursor: h["nextCursor"],
-          truncated: h["truncated"],
-          dropped_bytes: h["droppedBytes"],
-          process: Process.from(h["process"]),
-        )
-      end
+  # A file written.
+  # - +path+: Its path.
+  # - +size+: Its size in bytes, after the write.
+  # - +sha256+: Its SHA-256 in hex: given for a file written whole.
+  # - +offset+: Where the bytes were written: given for a write at an offset.
+  FileWritten = Struct.new(:path, :size, :sha256, :offset, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "chunks" => self.chunks&.map { |i| i&.to_wire },
-          "nextCursor" => self.next_cursor,
-          "truncated" => self.truncated,
-          "droppedBytes" => self.dropped_bytes,
-          "process" => self.process&.to_wire,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        size: h["size"],
+        sha256: h["sha256"],
+        offset: h["offset"],
+      )
     end
 
-    # Input to send a process.
-    # - +data+: The bytes.
-    # - +offset+: Bytes of input sent before these (its stdinOffset): a resend is then never taken twice. They go after every other write when omitted.
-    # - +eof+: Close its input after these (^D on a terminal).
-    ProcessInput = Struct.new(:data, :offset, :eof, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "size" => self.size,
+        "sha256" => self.sha256,
+        "offset" => self.offset,
+      }.compact
+    end
+  end
 
-        new(
-          data: h["data"],
-          offset: h["offset"],
-          eof: h["eof"],
-        )
-      end
+  # Some of a process's output.
+  # - +offset+: Where it starts in the process's output.
+  # - +stream+: The stream it was written to.
+  # - +text+: It, as text.
+  # - +base64+: It, as bytes, when the process answers base64.
+  OutputChunk = Struct.new(:offset, :stream, :text, :base64, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "data" => self.data,
-          "offset" => self.offset,
-          "eof" => self.eof,
-        }.compact
-      end
+      new(
+        offset: h["offset"],
+        stream: h["stream"],
+        text: h["text"],
+        base64: h["base64"],
+      )
     end
 
-    # Input a process took.
-    # - +offset+: Bytes of input it has taken in all.
-    # - +process+: The process.
-    ProcessWritten = Struct.new(:offset, :process, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "offset" => self.offset,
+        "stream" => self.stream,
+        "text" => self.text,
+        "base64" => self.base64,
+      }.compact
+    end
+  end
 
-        new(
-          offset: h["offset"],
-          process: Process.from(h["process"]),
-        )
-      end
+  # A process's output after a cursor.
+  # - +chunks+: The output, in the order it was written.
+  # - +next_cursor+: The cursor to read on from.
+  # - +truncated+: Output past the cursor was dropped before it was read.
+  # - +dropped_bytes+: How many bytes were dropped.
+  # - +process+: The process.
+  ProcessOutput = Struct.new(:chunks, :next_cursor, :truncated, :dropped_bytes, :process, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "offset" => self.offset,
-          "process" => self.process&.to_wire,
-        }.compact
-      end
+      new(
+        chunks: h["chunks"]&.map { |i| OutputChunk.from(i) },
+        next_cursor: h["nextCursor"],
+        truncated: h["truncated"],
+        dropped_bytes: h["droppedBytes"],
+        process: Process.from(h["process"]),
+      )
     end
 
-    # A signal to send a process and its group.
-    # - +signal+: The signal; SIGTERM when omitted.
-    ProcessSignal = Struct.new(:signal, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "chunks" => self.chunks&.map { |i| i&.to_wire },
+        "nextCursor" => self.next_cursor,
+        "truncated" => self.truncated,
+        "droppedBytes" => self.dropped_bytes,
+        "process" => self.process&.to_wire,
+      }.compact
+    end
+  end
 
-        new(
-          signal: h["signal"],
-        )
-      end
+  # Input to send a process.
+  # - +data+: The bytes.
+  # - +offset+: Bytes of input sent before these (its stdinOffset): a resend is then never taken twice. They go after every other write when omitted.
+  # - +eof+: Close its input after these (^D on a terminal).
+  ProcessInput = Struct.new(:data, :offset, :eof, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "signal" => self.signal,
-        }.compact
-      end
+      new(
+        data: h["data"],
+        offset: h["offset"],
+        eof: h["eof"],
+      )
     end
 
-    # A machine's processes, newest first.
-    # - +items+: Each process.
-    ProcessList = Struct.new(:items, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "data" => self.data,
+        "offset" => self.offset,
+        "eof" => self.eof,
+      }.compact
+    end
+  end
 
-        new(
-          items: h["items"]&.map { |i| Process.from(i) },
-        )
-      end
+  # Input a process took.
+  # - +offset+: Bytes of input it has taken in all.
+  # - +process+: The process.
+  ProcessWritten = Struct.new(:offset, :process, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "items" => self.items&.map { |i| i&.to_wire },
-        }.compact
-      end
+      new(
+        offset: h["offset"],
+        process: Process.from(h["process"]),
+      )
     end
 
-    # A file, a link or a directory to remove.
-    # - +path+: Its path.
-    # - +recursive+: A directory with its contents; refused for a directory with contents when omitted.
-    FileRemove = Struct.new(:path, :recursive, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "offset" => self.offset,
+        "process" => self.process&.to_wire,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          recursive: h["recursive"],
-        )
-      end
+  # A signal to send a process and its group.
+  # - +signal+: The signal; SIGTERM when omitted.
+  ProcessSignal = Struct.new(:signal, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "recursive" => self.recursive,
-        }.compact
-      end
+      new(
+        signal: h["signal"],
+      )
     end
 
-    # A file, a link or a directory removed.
-    # - +path+: Its path.
-    # - +removed+: It was there and is removed; false when it was missing.
-    FileRemoved = Struct.new(:path, :removed, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "signal" => self.signal,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          removed: h["removed"],
-        )
-      end
+  # A machine's processes, newest first.
+  # - +items+: Each process.
+  ProcessList = Struct.new(:items, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "removed" => self.removed,
-        }.compact
-      end
+      new(
+        items: h["items"]&.map { |i| Process.from(i) },
+      )
     end
 
-    # A path in a sandbox: what is there, if anything.
-    # - +path+: Its path.
-    # - +exists+: Something is there.
-    # - +name+: Its last part.
-    # - +type+: What it is: `file`, `directory`, `symlink` or `other`.
-    # - +size+: Its size in bytes.
-    # - +mode+: Its permissions, in octal (`0644`).
-    # - +modified_at+: When it last changed.
-    # - +uid+: Its owner's user ID.
-    # - +gid+: Its group's ID.
-    # - +symlink_target+: Where a link points.
-    # - +sha256+: A file's SHA-256 in hex, read from its bytes: given when asked (`sha256=true`).
-    FileInfo = Struct.new(:path, :exists, :name, :type, :size, :mode, :modified_at, :uid, :gid, :symlink_target, :sha256, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "items" => self.items&.map { |i| i&.to_wire },
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          exists: h["exists"],
-          name: h["name"],
-          type: h["type"],
-          size: h["size"],
-          mode: h["mode"],
-          modified_at: h["modifiedAt"],
-          uid: h["uid"],
-          gid: h["gid"],
-          symlink_target: h["symlinkTarget"],
-          sha256: h["sha256"],
-        )
-      end
+  # A file, a link or a directory to remove.
+  # - +path+: Its path.
+  # - +recursive+: A directory with its contents; refused for a directory with contents when omitted.
+  FileRemove = Struct.new(:path, :recursive, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "exists" => self.exists,
-          "name" => self.name,
-          "type" => self.type,
-          "size" => self.size,
-          "mode" => self.mode,
-          "modifiedAt" => self.modified_at,
-          "uid" => self.uid,
-          "gid" => self.gid,
-          "symlinkTarget" => self.symlink_target,
-          "sha256" => self.sha256,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        recursive: h["recursive"],
+      )
     end
 
-    # What a directory holds, in path order.
-    # - +items+: Each entry.
-    # - +truncated+: There were more entries than limit.
-    FileList = Struct.new(:items, :truncated, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "recursive" => self.recursive,
+      }.compact
+    end
+  end
 
-        new(
-          items: h["items"]&.map { |i| FileInfo.from(i) },
-          truncated: h["truncated"],
-        )
-      end
+  # A file, a link or a directory removed.
+  # - +path+: Its path.
+  # - +removed+: It was there and is removed; false when it was missing.
+  FileRemoved = Struct.new(:path, :removed, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "items" => self.items&.map { |i| i&.to_wire },
-          "truncated" => self.truncated,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        removed: h["removed"],
+      )
     end
 
-    # A folder unpacked.
-    # - +path+: The folder.
-    # - +received+: The archive's bytes tar took.
-    FolderUnpacked = Struct.new(:path, :received, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "removed" => self.removed,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          received: h["received"],
-        )
-      end
+  # A path in a machine: what is there, if anything.
+  # - +path+: Its path.
+  # - +exists+: Something is there.
+  # - +name+: Its last part.
+  # - +type+: What it is: `file`, `directory`, `symlink` or `other`.
+  # - +size+: Its size in bytes.
+  # - +mode+: Its permissions, in octal (`0644`).
+  # - +modified_at+: When it last changed.
+  # - +uid+: Its owner's user ID.
+  # - +gid+: Its group's ID.
+  # - +symlink_target+: Where a link points.
+  # - +sha256+: A file's SHA-256 in hex, read from its bytes: given when asked (`sha256=true`).
+  FileInfo = Struct.new(:path, :exists, :name, :type, :size, :mode, :modified_at, :uid, :gid, :symlink_target, :sha256, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "received" => self.received,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        exists: h["exists"],
+        name: h["name"],
+        type: h["type"],
+        size: h["size"],
+        mode: h["mode"],
+        modified_at: h["modifiedAt"],
+        uid: h["uid"],
+        gid: h["gid"],
+        symlink_target: h["symlinkTarget"],
+        sha256: h["sha256"],
+      )
     end
 
-    # A folder upload to begin: a tar archive sent in parts, unpacked into a folder as they arrive.
-    # - +path+: The folder, absolute and plain, such as `/workspace/app`: made with its parents.
-    # - +gzip+: The archive is gzip-compressed (`.tar.gz`). Default: false.
-    # - +user+: Who unpacks it: `runtime` or `root`; the machine's `user` when omitted.
-    FolderUploadBegin = Struct.new(:path, :gzip, :user, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "exists" => self.exists,
+        "name" => self.name,
+        "type" => self.type,
+        "size" => self.size,
+        "mode" => self.mode,
+        "modifiedAt" => self.modified_at,
+        "uid" => self.uid,
+        "gid" => self.gid,
+        "symlinkTarget" => self.symlink_target,
+        "sha256" => self.sha256,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          gzip: h["gzip"],
-          user: h["user"],
-        )
-      end
+  # What a directory holds, in path order.
+  # - +items+: Each entry.
+  # - +truncated+: There were more entries than limit.
+  FileList = Struct.new(:items, :truncated, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "gzip" => self.gzip,
-          "user" => self.user,
-        }.compact
-      end
+      new(
+        items: h["items"]&.map { |i| FileInfo.from(i) },
+        truncated: h["truncated"],
+      )
     end
 
-    # A folder upload begun: its parts go to it in order, then its commit.
-    # - +upload_id+: Its ID, which its parts, its commit and its abort name.
-    # - +path+: The folder it unpacks into.
-    # - +gzip+: The archive is gzip-compressed.
-    # - +chunk_bytes+: The most bytes a part should carry.
-    FolderUpload = Struct.new(:upload_id, :path, :gzip, :chunk_bytes, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "items" => self.items&.map { |i| i&.to_wire },
+        "truncated" => self.truncated,
+      }.compact
+    end
+  end
 
-        new(
-          upload_id: h["uploadId"],
-          path: h["path"],
-          gzip: h["gzip"],
-          chunk_bytes: h["chunkBytes"],
-        )
-      end
+  # A folder unpacked.
+  # - +path+: The folder.
+  # - +received+: The archive's bytes tar took.
+  FolderUnpacked = Struct.new(:path, :received, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "uploadId" => self.upload_id,
-          "path" => self.path,
-          "gzip" => self.gzip,
-          "chunkBytes" => self.chunk_bytes,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        received: h["received"],
+      )
     end
 
-    # A folder upload's part taken.
-    # - +received+: The archive's bytes tar has taken so far: the next part's offset.
-    FolderUploadReceived = Struct.new(:received, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "received" => self.received,
+      }.compact
+    end
+  end
 
-        new(
-          received: h["received"],
-        )
-      end
+  # A folder upload to begin: a tar archive sent in parts, unpacked into a folder as they arrive.
+  # - +path+: The folder, absolute and plain, such as `/workspace/app`: made with its parents.
+  # - +gzip+: The archive is gzip-compressed (`.tar.gz`). Default: false.
+  # - +user+: Who unpacks it: `runtime` or `root`; the machine's `user` when omitted.
+  FolderUploadBegin = Struct.new(:path, :gzip, :user, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "received" => self.received,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        gzip: h["gzip"],
+        user: h["user"],
+      )
     end
 
-    # A folder upload ended unfinished.
-    # - +aborted+: Always true: tar was stopped; what it unpacked stays.
-    FolderUploadAborted = Struct.new(:aborted, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "gzip" => self.gzip,
+        "user" => self.user,
+      }.compact
+    end
+  end
 
-        new(
-          aborted: h["aborted"],
-        )
-      end
+  # A folder upload begun: its parts go to it in order, then its commit.
+  # - +upload_id+: Its ID, which its parts, its commit and its abort name.
+  # - +path+: The folder it unpacks into.
+  # - +gzip+: The archive is gzip-compressed.
+  # - +chunk_bytes+: The most bytes a part should carry.
+  FolderUpload = Struct.new(:upload_id, :path, :gzip, :chunk_bytes, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "aborted" => self.aborted,
-        }.compact
-      end
+      new(
+        upload_id: h["uploadId"],
+        path: h["path"],
+        gzip: h["gzip"],
+        chunk_bytes: h["chunkBytes"],
+      )
     end
 
-    # A directory to make.
-    # - +path+: Its path.
-    # - +parents+: Its parents are made too; true when omitted.
-    FileMkdir = Struct.new(:path, :parents, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "uploadId" => self.upload_id,
+        "path" => self.path,
+        "gzip" => self.gzip,
+        "chunkBytes" => self.chunk_bytes,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          parents: h["parents"],
-        )
-      end
+  # A folder upload's part taken.
+  # - +received+: The archive's bytes tar has taken so far: the next part's offset.
+  FolderUploadReceived = Struct.new(:received, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "parents" => self.parents,
-        }.compact
-      end
+      new(
+        received: h["received"],
+      )
     end
 
-    # A directory made.
-    # - +path+: Its path.
-    # - +created+: It was made; false when it was there already.
-    FileMade = Struct.new(:path, :created, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "received" => self.received,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          created: h["created"],
-        )
-      end
+  # A folder upload ended unfinished.
+  # - +aborted+: Always true: tar was stopped; what it unpacked stays.
+  FolderUploadAborted = Struct.new(:aborted, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "created" => self.created,
-        }.compact
-      end
+      new(
+        aborted: h["aborted"],
+      )
     end
 
-    # A file, a link or a directory to move.
-    # - +from+: Where it is.
-    # - +to+: Where it goes.
-    # - +overwrite+: Replace what is at `to`; refused 409 when something is there and this is omitted.
-    # - +sha256+: The file's SHA-256 in hex: only a file whose bytes hash to it moves. With it, a rename sent again after it moved returns the same answer.
-    # - +size+: The file's size in bytes: only a file of this size, every byte of it written, moves. At least 0.
-    FileRename = Struct.new(:from, :to, :overwrite, :sha256, :size, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "aborted" => self.aborted,
+      }.compact
+    end
+  end
 
-        new(
-          from: h["from"],
-          to: h["to"],
-          overwrite: h["overwrite"],
-          sha256: h["sha256"],
-          size: h["size"],
-        )
-      end
+  # A directory to make.
+  # - +path+: Its path.
+  # - +parents+: Its parents are made too; true when omitted.
+  FileMkdir = Struct.new(:path, :parents, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "from" => self.from,
-          "to" => self.to,
-          "overwrite" => self.overwrite,
-          "sha256" => self.sha256,
-          "size" => self.size,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        parents: h["parents"],
+      )
     end
 
-    # A file, a link or a directory moved.
-    # - +from+: Where it was.
-    # - +to+: Where it is now.
-    # - +size+: Its size in bytes: given for a move checked by sha256.
-    # - +sha256+: Its SHA-256 in hex: given for a move checked by sha256.
-    FileRenamed = Struct.new(:from, :to, :size, :sha256, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "parents" => self.parents,
+      }.compact
+    end
+  end
 
-        new(
-          from: h["from"],
-          to: h["to"],
-          size: h["size"],
-          sha256: h["sha256"],
-        )
-      end
+  # A directory made.
+  # - +path+: Its path.
+  # - +created+: It was made; false when it was there already.
+  FileMade = Struct.new(:path, :created, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "from" => self.from,
-          "to" => self.to,
-          "size" => self.size,
-          "sha256" => self.sha256,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        created: h["created"],
+      )
     end
 
-    # A file link to make: an expiring address for one file of a sandbox (or, with `archive`, a folder) that anyone may open with no API key.
-    # - +path+: The file's absolute path in the sandbox. For GET it must exist when the link is made.
-    # - +method+: `GET` (default): a download link. `PUT`: an upload link; the request's body becomes the file.
-    # - +expires_in_seconds+: How long the link works, in seconds. At least 60. At most 604800. Default: 3600.
-    # - +filename+: Download as this name (`Content-Disposition: attachment`). Without it a picture, video, sound or plain text shows in the browser; anything else downloads.
-    # - +max_bytes+: PUT only: the largest body the link takes, in bytes; 5 GiB by default and at most. At least 0. At most 5368709120.
-    # - +wake+: false: a paused sandbox is not woken for the link, which answers 409 `sandbox_paused`. Unset or true: it is woken.
-    # - +archive+: GET only: `path` is a folder, downloaded as a `.tar.gz`. Default: false.
-    FileLinkCreate = Struct.new(:path, :method, :expires_in_seconds, :filename, :max_bytes, :wake, :archive, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "created" => self.created,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          method: h["method"],
-          expires_in_seconds: h["expiresInSeconds"],
-          filename: h["filename"],
-          max_bytes: h["maxBytes"],
-          wake: h["wake"],
-          archive: h["archive"],
-        )
-      end
+  # A file, a link or a directory to move.
+  # - +from+: Where it is.
+  # - +to+: Where it goes.
+  # - +overwrite+: Replace what is at `to`; refused 409 when something is there and this is omitted.
+  # - +sha256+: The file's SHA-256 in hex: only a file whose bytes hash to it moves. With it, a rename sent again after it moved returns the same answer.
+  # - +size+: The file's size in bytes: only a file of this size, every byte of it written, moves. At least 0.
+  FileRename = Struct.new(:from, :to, :overwrite, :sha256, :size, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "method" => self.method,
-          "expiresInSeconds" => self.expires_in_seconds,
-          "filename" => self.filename,
-          "maxBytes" => self.max_bytes,
-          "wake" => self.wake,
-          "archive" => self.archive,
-        }.compact
-      end
+      new(
+        from: h["from"],
+        to: h["to"],
+        overwrite: h["overwrite"],
+        sha256: h["sha256"],
+        size: h["size"],
+      )
     end
 
-    # A file link.
-    # - +url+: Its address, opened with no key: GET to download, PUT the file's bytes to upload.
-    # - +method+: `GET` or `PUT`.
-    # - +path+: The file's path in the sandbox.
-    # - +sandbox_id+: The sandbox.
-    # - +expires_at+: When it stops working.
-    # - +filename+: The name it downloads as.
-    # - +max_bytes+: The largest body an upload link takes.
-    # - +archive+: It downloads a folder as a `.tar.gz`.
-    FileLink = Struct.new(:url, :method, :path, :sandbox_id, :expires_at, :filename, :max_bytes, :archive, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "from" => self.from,
+        "to" => self.to,
+        "overwrite" => self.overwrite,
+        "sha256" => self.sha256,
+        "size" => self.size,
+      }.compact
+    end
+  end
 
-        new(
-          url: h["url"],
-          method: h["method"],
-          path: h["path"],
-          sandbox_id: h["sandboxId"],
-          expires_at: h["expiresAt"],
-          filename: h["filename"],
-          max_bytes: h["maxBytes"],
-          archive: h["archive"],
-        )
-      end
+  # A file, a link or a directory moved.
+  # - +from+: Where it was.
+  # - +to+: Where it is now.
+  # - +size+: Its size in bytes: given for a move checked by sha256.
+  # - +sha256+: Its SHA-256 in hex: given for a move checked by sha256.
+  FileRenamed = Struct.new(:from, :to, :size, :sha256, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "url" => self.url,
-          "method" => self.method,
-          "path" => self.path,
-          "sandboxId" => self.sandbox_id,
-          "expiresAt" => self.expires_at,
-          "filename" => self.filename,
-          "maxBytes" => self.max_bytes,
-          "archive" => self.archive,
-        }.compact
-      end
+      new(
+        from: h["from"],
+        to: h["to"],
+        size: h["size"],
+        sha256: h["sha256"],
+      )
     end
 
-    # A sandbox's file links ended.
-    # - +sandbox_id+: The sandbox.
-    # - +revoked_at+: When they ended: every link made before it.
-    FileLinksRevoked = Struct.new(:sandbox_id, :revoked_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "from" => self.from,
+        "to" => self.to,
+        "size" => self.size,
+        "sha256" => self.sha256,
+      }.compact
+    end
+  end
 
-        new(
-          sandbox_id: h["sandboxId"],
-          revoked_at: h["revokedAt"],
-        )
-      end
+  # A file link to make: an expiring address for one file of a machine (or, with `archive`, a folder) that anyone may open with no API key.
+  # - +path+: The file's absolute path in the machine. For GET it must exist when the link is made.
+  # - +method+: `GET` (default): a download link. `PUT`: an upload link; the request's body becomes the file.
+  # - +expires_in_seconds+: How long the link works, in seconds. At least 60. At most 604800. Default: 3600.
+  # - +filename+: Download as this name (`Content-Disposition: attachment`). Without it a picture, video, sound or plain text shows in the browser; anything else downloads.
+  # - +max_bytes+: PUT only: the largest body the link takes, in bytes; 5 GiB by default and at most. At least 0. At most 5368709120.
+  # - +wake+: false: a paused machine is not woken for the link, which answers 409 `sandbox_paused`. Unset or true: it is woken.
+  # - +archive+: GET only: `path` is a folder, downloaded as a `.tar.gz`. Default: false.
+  FileLinkCreate = Struct.new(:path, :method, :expires_in_seconds, :filename, :max_bytes, :wake, :archive, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "sandboxId" => self.sandbox_id,
-          "revokedAt" => self.revoked_at,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        method: h["method"],
+        expires_in_seconds: h["expiresInSeconds"],
+        filename: h["filename"],
+        max_bytes: h["maxBytes"],
+        wake: h["wake"],
+        archive: h["archive"],
+      )
     end
 
-    # Where a sandbox may connect out.
-    # - +allow_outbound+: The only places it may reach, each a host, `*.` and a name for every name under it, an address or a CIDR (`[` and `]` around an IPv6 address), every port when it names none; `:port` for that port alone, on a host name for a port beyond 80 and 443, which go together. `*` is every public host. Every public host when omitted; nothing when empty.
-    # - +deny_outbound+: Places it may never reach, written as in allowOutbound with no port: a deny wins over every allow.
-    # - +id+: The sandbox's ID.
-    SandboxNetwork = Struct.new(:allow_outbound, :deny_outbound, :id, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "method" => self.method,
+        "expiresInSeconds" => self.expires_in_seconds,
+        "filename" => self.filename,
+        "maxBytes" => self.max_bytes,
+        "wake" => self.wake,
+        "archive" => self.archive,
+      }.compact
+    end
+  end
 
-        new(
-          allow_outbound: h["allowOutbound"],
-          deny_outbound: h["denyOutbound"],
-          id: h["id"],
-        )
-      end
+  # A file link.
+  # - +url+: Its address, opened with no key: GET to download, PUT the file's bytes to upload.
+  # - +method+: `GET` or `PUT`.
+  # - +path+: The file's path in the machine.
+  # - +sandbox_id+: The machine.
+  # - +expires_at+: When it stops working.
+  # - +filename+: The name it downloads as.
+  # - +max_bytes+: The largest body an upload link takes.
+  # - +archive+: It downloads a folder as a `.tar.gz`.
+  FileLink = Struct.new(:url, :method, :path, :sandbox_id, :expires_at, :filename, :max_bytes, :archive, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "allowOutbound" => self.allow_outbound,
-          "denyOutbound" => self.deny_outbound,
-          "id" => self.id,
-        }.compact
-      end
+      new(
+        url: h["url"],
+        method: h["method"],
+        path: h["path"],
+        sandbox_id: h["sandboxId"],
+        expires_at: h["expiresAt"],
+        filename: h["filename"],
+        max_bytes: h["maxBytes"],
+        archive: h["archive"],
+      )
     end
 
-    # A machine's CPU and memory as its host measures them from the machine's own cgroup, never by a call into the machine, so reading them does not wake it or keep it awake. Either the current reading (over the host's last 5 seconds, with disk and pressure) or one step of a window (averaged over the time the machine ran in it).
-    # - +at+: When it was read; for a step, where the step starts.
-    # - +cpu_percent+: Its CPU, as a percent of all its vCPUs (0 to 100).
-    # - +cpu_cores+: The same as a number of cores.
-    # - +cpu_peak_percent+: Its busiest minute, as a percent of all its vCPUs.
-    # - +cpu_wait_percent+: Percent of the last 10 seconds some task of it waited for a CPU.
-    # - +memory_stall_percent+: Percent of the last 10 seconds some task of it waited for memory.
-    # - +memory_bytes+: Memory it holds, in bytes: its resident memory on its host.
-    # - +memory_peak_bytes+: The most memory it has held, in bytes; for a step, its highest minute's average.
-    # - +samples+: How many measures it is made of: two reads for the reading now; for a step, the minutes the host measured it in.
-    # - +disk_read_bytes_per_second+: Bytes its disks read a second.
-    # - +disk_write_bytes_per_second+: Bytes its disks wrote a second.
-    # - +disk_read_ops_per_second+: Reads its disks completed a second.
-    # - +disk_write_ops_per_second+: Writes its disks completed a second.
-    MetricPoint = Struct.new(:at, :cpu_percent, :cpu_cores, :cpu_peak_percent, :cpu_wait_percent, :memory_stall_percent, :memory_bytes, :memory_peak_bytes, :samples, :disk_read_bytes_per_second, :disk_write_bytes_per_second, :disk_read_ops_per_second, :disk_write_ops_per_second, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "url" => self.url,
+        "method" => self.method,
+        "path" => self.path,
+        "sandboxId" => self.sandbox_id,
+        "expiresAt" => self.expires_at,
+        "filename" => self.filename,
+        "maxBytes" => self.max_bytes,
+        "archive" => self.archive,
+      }.compact
+    end
+  end
 
-        new(
-          at: h["at"],
-          cpu_percent: h["cpuPercent"],
-          cpu_cores: h["cpuCores"],
-          cpu_peak_percent: h["cpuPeakPercent"],
-          cpu_wait_percent: h["cpuWaitPercent"],
-          memory_stall_percent: h["memoryStallPercent"],
-          memory_bytes: h["memoryBytes"],
-          memory_peak_bytes: h["memoryPeakBytes"],
-          samples: h["samples"],
-          disk_read_bytes_per_second: h["diskReadBytesPerSecond"],
-          disk_write_bytes_per_second: h["diskWriteBytesPerSecond"],
-          disk_read_ops_per_second: h["diskReadOpsPerSecond"],
-          disk_write_ops_per_second: h["diskWriteOpsPerSecond"],
-        )
-      end
+  # A machine's file links ended.
+  # - +sandbox_id+: The machine.
+  # - +revoked_at+: When they ended: every link made before it.
+  FileLinksRevoked = Struct.new(:sandbox_id, :revoked_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "at" => self.at,
-          "cpuPercent" => self.cpu_percent,
-          "cpuCores" => self.cpu_cores,
-          "cpuPeakPercent" => self.cpu_peak_percent,
-          "cpuWaitPercent" => self.cpu_wait_percent,
-          "memoryStallPercent" => self.memory_stall_percent,
-          "memoryBytes" => self.memory_bytes,
-          "memoryPeakBytes" => self.memory_peak_bytes,
-          "samples" => self.samples,
-          "diskReadBytesPerSecond" => self.disk_read_bytes_per_second,
-          "diskWriteBytesPerSecond" => self.disk_write_bytes_per_second,
-          "diskReadOpsPerSecond" => self.disk_read_ops_per_second,
-          "diskWriteOpsPerSecond" => self.disk_write_ops_per_second,
-        }.compact
-      end
+      new(
+        sandbox_id: h["sandboxId"],
+        revoked_at: h["revokedAt"],
+      )
     end
 
-    # A sandbox's CPU and memory over a time window, in steps, and its current reading (with disk and pressure) while it runs. Steps are returned in every state, including paused and stopped. Ranges: `15m` and `1h` in 60-second steps, `6h` in 120-second steps, `24h` in 480-second steps, `7d` and `30d` in 1-hour steps. Defaults to `1h`.
-    # - +state+: Its state.
-    # - +range+: The window asked for.
-    # - +step_seconds+: The window's step, in seconds.
-    # - +since+: Where the window starts: the start of the step that holds the range's start.
-    # - +until+: Where it ends: now.
-    # - +vcpu+: Its vCPUs.
-    # - +memory_limit_bytes+: Its memory, in bytes.
-    # - +disk_limit_bytes+: Its disk, in bytes.
-    # - +latest+: The reading taken now; none when it is not running or its host could not read it.
-    # - +points+: The window's steps, oldest first, each averaged over the time the sandbox ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading.
-    MetricsBase = Struct.new(:state, :range, :step_seconds, :since, :until, :vcpu, :memory_limit_bytes, :disk_limit_bytes, :latest, :points, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "sandboxId" => self.sandbox_id,
+        "revokedAt" => self.revoked_at,
+      }.compact
+    end
+  end
 
-        new(
-          state: h["state"],
-          range: h["range"],
-          step_seconds: h["stepSeconds"],
-          since: h["since"],
-          until: h["until"],
-          vcpu: h["vcpu"],
-          memory_limit_bytes: h["memoryLimitBytes"],
-          disk_limit_bytes: h["diskLimitBytes"],
-          latest: MetricPoint.from(h["latest"]),
-          points: h["points"]&.map { |i| MetricPoint.from(i) },
-        )
-      end
+  # Where a machine may connect out.
+  # - +allow_outbound+: The only places it may reach, each a host, `*.` and a name for every name under it, an address or a CIDR (`[` and `]` around an IPv6 address), every port when it names none; `:port` for that port alone, on a host name for a port beyond 80 and 443, which go together. `*` is every public host. Every public host when omitted; nothing when empty.
+  # - +deny_outbound+: Places it may never reach, written as in allowOutbound with no port: a deny wins over every allow.
+  # - +id+: The machine's ID.
+  SandboxNetwork = Struct.new(:allow_outbound, :deny_outbound, :id, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "state" => self.state,
-          "range" => self.range,
-          "stepSeconds" => self.step_seconds,
-          "since" => self.since,
-          "until" => self.until,
-          "vcpu" => self.vcpu,
-          "memoryLimitBytes" => self.memory_limit_bytes,
-          "diskLimitBytes" => self.disk_limit_bytes,
-          "latest" => self.latest&.to_wire,
-          "points" => self.points&.map { |i| i&.to_wire },
-        }.compact
-      end
+      new(
+        allow_outbound: h["allowOutbound"],
+        deny_outbound: h["denyOutbound"],
+        id: h["id"],
+      )
     end
 
-    # A sandbox's metrics.
-    # - +state+: Its state.
-    # - +range+: The window asked for.
-    # - +step_seconds+: The window's step, in seconds.
-    # - +since+: Where the window starts: the start of the step that holds the range's start.
-    # - +until+: Where it ends: now.
-    # - +vcpu+: Its vCPUs.
-    # - +memory_limit_bytes+: Its memory, in bytes.
-    # - +disk_limit_bytes+: Its disk, in bytes.
-    # - +latest+: The reading taken now; none when it is not running or its host could not read it.
-    # - +points+: The window's steps, oldest first, each averaged over the time the sandbox ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading.
-    # - +id+: The sandbox's ID.
-    SandboxMetrics = Struct.new(:state, :range, :step_seconds, :since, :until, :vcpu, :memory_limit_bytes, :disk_limit_bytes, :latest, :points, :id, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "allowOutbound" => self.allow_outbound,
+        "denyOutbound" => self.deny_outbound,
+        "id" => self.id,
+      }.compact
+    end
+  end
 
-        new(
-          state: h["state"],
-          range: h["range"],
-          step_seconds: h["stepSeconds"],
-          since: h["since"],
-          until: h["until"],
-          vcpu: h["vcpu"],
-          memory_limit_bytes: h["memoryLimitBytes"],
-          disk_limit_bytes: h["diskLimitBytes"],
-          latest: MetricPoint.from(h["latest"]),
-          points: h["points"]&.map { |i| MetricPoint.from(i) },
-          id: h["id"],
-        )
-      end
+  # A machine's CPU and memory as its host measures them from the machine's own cgroup, never by a call into the machine, so reading them does not wake it or keep it awake. Either the current reading (over the host's last 5 seconds, with disk and pressure) or one step of a window (averaged over the time the machine ran in it).
+  # - +at+: When it was read; for a step, where the step starts.
+  # - +cpu_percent+: Its CPU, as a percent of all its vCPUs (0 to 100).
+  # - +cpu_cores+: The same as a number of cores.
+  # - +cpu_peak_percent+: Its busiest minute, as a percent of all its vCPUs.
+  # - +cpu_wait_percent+: Percent of the last 10 seconds some task of it waited for a CPU.
+  # - +memory_stall_percent+: Percent of the last 10 seconds some task of it waited for memory.
+  # - +memory_bytes+: Memory it holds, in bytes: its resident memory on its host.
+  # - +memory_peak_bytes+: The most memory it has held, in bytes; for a step, its highest minute's average.
+  # - +samples+: How many measures it is made of: two reads for the reading now; for a step, the minutes the host measured it in.
+  # - +disk_read_bytes_per_second+: Bytes its disks read a second.
+  # - +disk_write_bytes_per_second+: Bytes its disks wrote a second.
+  # - +disk_read_ops_per_second+: Reads its disks completed a second.
+  # - +disk_write_ops_per_second+: Writes its disks completed a second.
+  MetricPoint = Struct.new(:at, :cpu_percent, :cpu_cores, :cpu_peak_percent, :cpu_wait_percent, :memory_stall_percent, :memory_bytes, :memory_peak_bytes, :samples, :disk_read_bytes_per_second, :disk_write_bytes_per_second, :disk_read_ops_per_second, :disk_write_ops_per_second, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "state" => self.state,
-          "range" => self.range,
-          "stepSeconds" => self.step_seconds,
-          "since" => self.since,
-          "until" => self.until,
-          "vcpu" => self.vcpu,
-          "memoryLimitBytes" => self.memory_limit_bytes,
-          "diskLimitBytes" => self.disk_limit_bytes,
-          "latest" => self.latest&.to_wire,
-          "points" => self.points&.map { |i| i&.to_wire },
-          "id" => self.id,
-        }.compact
-      end
+      new(
+        at: h["at"],
+        cpu_percent: h["cpuPercent"],
+        cpu_cores: h["cpuCores"],
+        cpu_peak_percent: h["cpuPeakPercent"],
+        cpu_wait_percent: h["cpuWaitPercent"],
+        memory_stall_percent: h["memoryStallPercent"],
+        memory_bytes: h["memoryBytes"],
+        memory_peak_bytes: h["memoryPeakBytes"],
+        samples: h["samples"],
+        disk_read_bytes_per_second: h["diskReadBytesPerSecond"],
+        disk_write_bytes_per_second: h["diskWriteBytesPerSecond"],
+        disk_read_ops_per_second: h["diskReadOpsPerSecond"],
+        disk_write_ops_per_second: h["diskWriteOpsPerSecond"],
+      )
     end
 
-    # Copies of a sandbox to make, as it is now.
-    # - +count+: How many. At least 1. At most 100. Default: 1.
-    # - +name+: Its name, for a fork of one.
-    # - +labels+: Labels each copy gets.
-    # - +secrets+: The secrets each copy gets, by name: only these, never one its source may not use; its source's when omitted. At most 64 items.
-    # - +max_cost+: The most each may cost in all, in US dollars (`"5.00"`): once one has cost that it pauses, as a create's maxCost. When omitted, the least of its key's caps and its source's maxCost.
-    # - +idle_pause_seconds+: Seconds with nothing happening before each copy pauses, 60 to 86400; 0 never. When omitted, its source's, unless its source never pauses (0): then its product's default, 300 for a sandbox. At least 0. At most 86400.
-    ForkRequest = Struct.new(:count, :name, :labels, :secrets, :max_cost, :idle_pause_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "at" => self.at,
+        "cpuPercent" => self.cpu_percent,
+        "cpuCores" => self.cpu_cores,
+        "cpuPeakPercent" => self.cpu_peak_percent,
+        "cpuWaitPercent" => self.cpu_wait_percent,
+        "memoryStallPercent" => self.memory_stall_percent,
+        "memoryBytes" => self.memory_bytes,
+        "memoryPeakBytes" => self.memory_peak_bytes,
+        "samples" => self.samples,
+        "diskReadBytesPerSecond" => self.disk_read_bytes_per_second,
+        "diskWriteBytesPerSecond" => self.disk_write_bytes_per_second,
+        "diskReadOpsPerSecond" => self.disk_read_ops_per_second,
+        "diskWriteOpsPerSecond" => self.disk_write_ops_per_second,
+      }.compact
+    end
+  end
 
-        new(
-          count: h["count"],
-          name: h["name"],
-          labels: h["labels"],
-          secrets: h["secrets"],
-          max_cost: h["maxCost"],
-          idle_pause_seconds: h["idlePauseSeconds"],
-        )
-      end
+  # A machine's CPU and memory over a time window, in steps, and its current reading (with disk and pressure) while it runs. Steps are returned in every state, including paused and stopped. Ranges: `15m` and `1h` in 60-second steps, `6h` in 120-second steps, `24h` in 480-second steps, `7d` and `30d` in 1-hour steps. Defaults to `1h`.
+  # - +state+: Its state.
+  # - +range+: The window asked for.
+  # - +step_seconds+: The window's step, in seconds.
+  # - +since+: Where the window starts: the start of the step that holds the range's start.
+  # - +until+: Where it ends: now.
+  # - +vcpu+: Its vCPUs.
+  # - +memory_limit_bytes+: Its memory, in bytes.
+  # - +disk_limit_bytes+: Its disk, in bytes.
+  # - +latest+: The reading taken now; none when it is not running or its host could not read it.
+  # - +points+: The window's steps, oldest first, each averaged over the time the machine ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading.
+  MetricsBase = Struct.new(:state, :range, :step_seconds, :since, :until, :vcpu, :memory_limit_bytes, :disk_limit_bytes, :latest, :points, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "count" => self.count,
-          "name" => self.name,
-          "labels" => self.labels,
-          "secrets" => self.secrets,
-          "maxCost" => self.max_cost,
-          "idlePauseSeconds" => self.idle_pause_seconds,
-        }.compact
-      end
+      new(
+        state: h["state"],
+        range: h["range"],
+        step_seconds: h["stepSeconds"],
+        since: h["since"],
+        until: h["until"],
+        vcpu: h["vcpu"],
+        memory_limit_bytes: h["memoryLimitBytes"],
+        disk_limit_bytes: h["diskLimitBytes"],
+        latest: MetricPoint.from(h["latest"]),
+        points: h["points"]&.map { |i| MetricPoint.from(i) },
+      )
     end
 
-    # The copies a fork made, each running.
-    # - +sandboxes+: The copies, in the order made.
-    Forked = Struct.new(:sandboxes, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "state" => self.state,
+        "range" => self.range,
+        "stepSeconds" => self.step_seconds,
+        "since" => self.since,
+        "until" => self.until,
+        "vcpu" => self.vcpu,
+        "memoryLimitBytes" => self.memory_limit_bytes,
+        "diskLimitBytes" => self.disk_limit_bytes,
+        "latest" => self.latest&.to_wire,
+        "points" => self.points&.map { |i| i&.to_wire },
+      }.compact
+    end
+  end
 
-        new(
-          sandboxes: h["sandboxes"]&.map { |i| Sandbox.from(i) },
-        )
-      end
+  # A machine's metrics.
+  # - +state+: Its state.
+  # - +range+: The window asked for.
+  # - +step_seconds+: The window's step, in seconds.
+  # - +since+: Where the window starts: the start of the step that holds the range's start.
+  # - +until+: Where it ends: now.
+  # - +vcpu+: Its vCPUs.
+  # - +memory_limit_bytes+: Its memory, in bytes.
+  # - +disk_limit_bytes+: Its disk, in bytes.
+  # - +latest+: The reading taken now; none when it is not running or its host could not read it.
+  # - +points+: The window's steps, oldest first, each averaged over the time the machine ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading.
+  # - +id+: The machine's ID.
+  SandboxMetrics = Struct.new(:state, :range, :step_seconds, :since, :until, :vcpu, :memory_limit_bytes, :disk_limit_bytes, :latest, :points, :id, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "sandboxes" => self.sandboxes&.map { |i| i&.to_wire },
-        }.compact
-      end
+      new(
+        state: h["state"],
+        range: h["range"],
+        step_seconds: h["stepSeconds"],
+        since: h["since"],
+        until: h["until"],
+        vcpu: h["vcpu"],
+        memory_limit_bytes: h["memoryLimitBytes"],
+        disk_limit_bytes: h["diskLimitBytes"],
+        latest: MetricPoint.from(h["latest"]),
+        points: h["points"]&.map { |i| MetricPoint.from(i) },
+        id: h["id"],
+      )
     end
 
-    # A snapshot of a sandbox to take.
-    # - +name+: Its name, unique among the project's snapshots.
-    # - +labels+: Labels to find it by.
-    # - +image+: Keeps its disk alone, synced, as the next version of the image of this name (`name:1`, `name:2`, ...) in place of a snapshot: an image machines are created from, each booting fresh over a disk of its own. Its memory is not kept; name is ignored.
-    # - +start+: With image: the command each machine created from the image starts at every fresh boot; the sandbox's own when omitted.
-    SnapshotRequest = Struct.new(:name, :labels, :image, :start, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "state" => self.state,
+        "range" => self.range,
+        "stepSeconds" => self.step_seconds,
+        "since" => self.since,
+        "until" => self.until,
+        "vcpu" => self.vcpu,
+        "memoryLimitBytes" => self.memory_limit_bytes,
+        "diskLimitBytes" => self.disk_limit_bytes,
+        "latest" => self.latest&.to_wire,
+        "points" => self.points&.map { |i| i&.to_wire },
+        "id" => self.id,
+      }.compact
+    end
+  end
 
-        new(
-          name: h["name"],
-          labels: h["labels"],
-          image: h["image"],
-          start: MachineStart.from(h["start"]),
-        )
-      end
+  # Copies of a machine to make, as it is now.
+  # - +count+: How many. At least 1. At most 100. Default: 1.
+  # - +name+: Its name, for a fork of one.
+  # - +labels+: Labels each copy gets.
+  # - +secrets+: The secrets each copy gets, by name: only these, never one its source may not use; its source's when omitted. At most 64 items.
+  # - +max_cost+: The most each may cost in all, in US dollars (`"5.00"`): once one has cost that it pauses, as a create's maxCost. When omitted, the least of its key's caps and its source's maxCost.
+  # - +idle_pause_seconds+: Seconds with nothing happening before each copy pauses, 60 to 86400; 0 never. When omitted, its source's, unless its source never pauses (0): then its product's default, 300 for a sandbox. At least 0. At most 86400.
+  # - +vcpu+: The vCPUs each copy may use, at most its source's; its source's when omitted. A copy keeps its source's vCPUs online and is held to this many vCPUs of CPU time, which it is placed and billed by. Its memory is its source's. At least 1.
+  # - +delete_after_seconds+: Seconds until Runtime deletes each copy, as its delete does: final, and it can't be undone. 0 or omitted: kept until deleted; a copy never takes its source's. At least 0. At most 315360000.
+  # - +delete_protection+: Whether each copy's delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`; a copy never takes its source's.
+  ForkRequest = Struct.new(:count, :name, :labels, :secrets, :max_cost, :idle_pause_seconds, :vcpu, :delete_after_seconds, :delete_protection, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "name" => self.name,
-          "labels" => self.labels,
-          "image" => self.image,
-          "start" => self.start&.to_wire,
-        }.compact
-      end
+      new(
+        count: h["count"],
+        name: h["name"],
+        labels: h["labels"],
+        secrets: h["secrets"],
+        max_cost: h["maxCost"],
+        idle_pause_seconds: h["idlePauseSeconds"],
+        vcpu: h["vcpu"],
+        delete_after_seconds: h["deleteAfterSeconds"],
+        delete_protection: h["deleteProtection"],
+      )
     end
 
-    # Stored data: a snapshot, an image or a volume.
-    # - +id+: Its ID.
-    # - +object+: Its kind: `snapshot`, `image` or `volume`.
-    # - +name+: Its name, unique in its project among its kind.
-    # - +state+: Where it is.
-    # - +labels+: Its labels.
-    # - +size_bytes+: What it was made to hold, in bytes.
-    # - +stored_bytes+: What it holds now, in bytes.
-    # - +parent_id+: What it was made from (a snapshot's sandbox, an image's base), if anything.
-    # - +attached_to+: The machine it is attached to now, if any.
-    # - +created_at+: When it was made.
-    # - +version+: An image's version of its name: each build or keep of a name is its next.
-    # - +tags+: An image's tags, each `name:tag`.
-    # - +error+: Why an image's build failed.
-    # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
-    Stored = Struct.new(:id, :object, :name, :state, :labels, :size_bytes, :stored_bytes, :parent_id, :attached_to, :created_at, :version, :tags, :error, :deleted_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "count" => self.count,
+        "name" => self.name,
+        "labels" => self.labels,
+        "secrets" => self.secrets,
+        "maxCost" => self.max_cost,
+        "idlePauseSeconds" => self.idle_pause_seconds,
+        "vcpu" => self.vcpu,
+        "deleteAfterSeconds" => self.delete_after_seconds,
+        "deleteProtection" => self.delete_protection,
+      }.compact
+    end
+  end
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          name: h["name"],
-          state: h["state"],
-          labels: h["labels"],
-          size_bytes: h["sizeBytes"],
-          stored_bytes: h["storedBytes"],
-          parent_id: h["parentId"],
-          attached_to: h["attachedTo"],
-          created_at: h["createdAt"],
-          version: h["version"],
-          tags: h["tags"],
-          error: h["error"],
-          deleted_at: h["deletedAt"],
-        )
-      end
+  # The copies a fork made, each running.
+  # - +sandboxes+: The copies, in the order made.
+  Forked = Struct.new(:sandboxes, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "name" => self.name,
-          "state" => self.state,
-          "labels" => self.labels,
-          "sizeBytes" => self.size_bytes,
-          "storedBytes" => self.stored_bytes,
-          "parentId" => self.parent_id,
-          "attachedTo" => self.attached_to,
-          "createdAt" => self.created_at,
-          "version" => self.version,
-          "tags" => self.tags,
-          "error" => self.error,
-          "deletedAt" => self.deleted_at,
-        }.compact
-      end
+      new(
+        sandboxes: h["sandboxes"]&.map { |i| SandboxInfo.from(i) },
+      )
     end
 
-    # A change to a machine's settings: each field left out stays as it is.
-    # - +name+: Its name, unique in its project.
-    # - +labels+: Its labels, in place of its own; those under `runtime.` are kept.
-    # - +idle_pause_seconds+: Seconds with nothing happening before it pauses, 60 to 86400; 0 never.
-    # - +vcpu+: Its vCPUs, grown while it runs; a running sandbox's vCPUs only grow. At least 1.
-    # - +memory_gb+: Its memory in GB (1 GB is 1,024 MiB), grown while it runs; a running sandbox's memory only grows. At least 1.
-    # - +disk_gb+: Its disk in GB (1 GB is 1,024 MiB), grown while it runs, its file system with it; a disk only grows. At least 1.
-    # - +user+: Who its commands run as from now when a call names no `user`: `runtime` or `root`. Running ones keep theirs.
-    # - +env+: Environment variables to set, each over its own value, the others kept: the update answers once a running one holds the change (a paused one is given it at its wake), so each process, command and terminal it starts after the answer has them; processes already running keep the environment they started with. At most 32 variables and 32768 bytes of names and values in all, as a create's; values are never answered.
-    # - +remove_env+: Names of environment variables to take out, the same way: gone from the next process it starts; processes already running keep them.
-    # - +max_cost+: The most it may cost in all, in US dollars (`"5.00"`), in place of its own: one paused at its old maxCost wakes at its next call under a higher one.
-    MachineUpdate = Struct.new(:name, :labels, :idle_pause_seconds, :vcpu, :memory_gb, :disk_gb, :user, :env, :remove_env, :max_cost, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "sandboxes" => self.sandboxes&.map { |i| i&.to_wire },
+      }.compact
+    end
+  end
 
-        new(
-          name: h["name"],
-          labels: h["labels"],
-          idle_pause_seconds: h["idlePauseSeconds"],
-          vcpu: h["vcpu"],
-          memory_gb: h["memoryGB"],
-          disk_gb: h["diskGB"],
-          user: h["user"],
-          env: h["env"],
-          remove_env: h["removeEnv"],
-          max_cost: h["maxCost"],
-        )
-      end
+  # A snapshot of a machine to take.
+  # - +name+: Its name, unique among the project's snapshots.
+  # - +labels+: Labels to find it by.
+  # - +image+: Keeps its disk alone, synced, as the next version of the image of this name (`name:1`, `name:2`, ...) in place of a snapshot: an image machines are created from, each booting fresh over a disk of its own. Its memory is not kept; name is ignored.
+  # - +start+: With image: the command each machine created from the image starts at every fresh boot; the machine's own when omitted.
+  # - +delete_after_seconds+: Seconds until Runtime deletes the snapshot (or, with image, that image version), as its delete does: final, and it can't be undone. 0 or omitted: kept until deleted. At least 0. At most 315360000.
+  # - +delete_protection+: Whether the snapshot's (or, with image, that image version's) delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`.
+  SnapshotRequest = Struct.new(:name, :labels, :image, :start, :delete_after_seconds, :delete_protection, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "name" => self.name,
-          "labels" => self.labels,
-          "idlePauseSeconds" => self.idle_pause_seconds,
-          "vcpu" => self.vcpu,
-          "memoryGB" => self.memory_gb,
-          "diskGB" => self.disk_gb,
-          "user" => self.user,
-          "env" => self.env,
-          "removeEnv" => self.remove_env,
-          "maxCost" => self.max_cost,
-        }.compact
-      end
+      new(
+        name: h["name"],
+        labels: h["labels"],
+        image: h["image"],
+        start: MachineStart.from(h["start"]),
+        delete_after_seconds: h["deleteAfterSeconds"],
+        delete_protection: h["deleteProtection"],
+      )
     end
 
-    # One step of an act: a mouse move, click, drag or scroll, typed text, a key chord, or a wait.
-    # - +type+: What it does: `move` to `x`,`y`; `click` (at `x`,`y` when given, `count` times, with `keys` held); `mouseDown` and `mouseUp` of `button`; `drag` from `x`,`y` to `toX`,`toY`; `scroll` by `dx`,`dy` wheel clicks (at `x`,`y` when given); `type` `text`; `key` the chords in `keys`; `wait` `ms`.
-    # - +x+: Pixels from the screen's left edge. At least 0. At most 16384.
-    # - +y+: Pixels from the screen's top edge. At least 0. At most 16384.
-    # - +to_x+: A drag's end, from the left edge. At least 0. At most 16384.
-    # - +to_y+: A drag's end, from the top edge. At least 0. At most 16384.
-    # - +button+: The mouse button of a click, a drag, a mouseDown or a mouseUp. Default: "left".
-    # - +count+: A click's count: 2 a double click, 3 a triple click. At least 1. At most 3. Default: 1.
-    # - +dx+: A scroll's wheel clicks to the right (negative to the left). At least -100. At most 100.
-    # - +dy+: A scroll's wheel clicks down (negative up). At least -100. At most 100.
-    # - +text+: The text a `type` types, as it is: any Unicode, newlines and tabs. At most 8192 characters.
-    # - +keys+: For `key`, chords pressed in turn, space-separated, each keys joined by `+` in X keysym names (`ctrl+l`, `Return`, `ctrl+shift+t`); for `click` and `scroll`, the modifiers held during it (`shift`, `ctrl+alt`). At most 1000 characters.
-    # - +ms+: A wait's milliseconds. At least 0. At most 10000.
-    Action = Struct.new(:type, :x, :y, :to_x, :to_y, :button, :count, :dx, :dy, :text, :keys, :ms, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "name" => self.name,
+        "labels" => self.labels,
+        "image" => self.image,
+        "start" => self.start&.to_wire,
+        "deleteAfterSeconds" => self.delete_after_seconds,
+        "deleteProtection" => self.delete_protection,
+      }.compact
+    end
+  end
 
-        new(
-          type: h["type"],
-          x: h["x"],
-          y: h["y"],
-          to_x: h["toX"],
-          to_y: h["toY"],
-          button: h["button"],
-          count: h["count"],
-          dx: h["dx"],
-          dy: h["dy"],
-          text: h["text"],
-          keys: h["keys"],
-          ms: h["ms"],
-        )
-      end
+  # Stored data: a snapshot, an image or a volume.
+  # - +id+: Its ID.
+  # - +object+: Its kind: `snapshot`, `image` or `volume`.
+  # - +name+: Its name, unique in its project among its kind.
+  # - +state+: Where it is.
+  # - +labels+: Its labels.
+  # - +size_bytes+: What it was made to hold, in bytes.
+  # - +stored_bytes+: What it holds now, in bytes.
+  # - +parent_id+: What it was made from (a snapshot's machine, an image's base), if anything.
+  # - +attached_to+: The machine it is attached to now, if any.
+  # - +created_at+: When it was made.
+  # - +version+: An image's version of its name: each build or keep of a name is its next.
+  # - +tags+: An image's tags, each `name:tag`.
+  # - +error+: Why an image's build failed.
+  # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
+  # - +delete_at+: When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted.
+  # - +delete_waits_for+: Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does.
+  # - +delete_protection+: Whether its delete is refused (409 `delete_protected`) until an update turns this off.
+  Stored = Struct.new(:id, :object, :name, :state, :labels, :size_bytes, :stored_bytes, :parent_id, :attached_to, :created_at, :version, :tags, :error, :deleted_at, :delete_at, :delete_waits_for, :delete_protection, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "type" => self.type,
-          "x" => self.x,
-          "y" => self.y,
-          "toX" => self.to_x,
-          "toY" => self.to_y,
-          "button" => self.button,
-          "count" => self.count,
-          "dx" => self.dx,
-          "dy" => self.dy,
-          "text" => self.text,
-          "keys" => self.keys,
-          "ms" => self.ms,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        object: h["object"],
+        name: h["name"],
+        state: h["state"],
+        labels: h["labels"],
+        size_bytes: h["sizeBytes"],
+        stored_bytes: h["storedBytes"],
+        parent_id: h["parentId"],
+        attached_to: h["attachedTo"],
+        created_at: h["createdAt"],
+        version: h["version"],
+        tags: h["tags"],
+        error: h["error"],
+        deleted_at: h["deletedAt"],
+        delete_at: h["deleteAt"],
+        delete_waits_for: h["deleteWaitsFor"],
+        delete_protection: h["deleteProtection"],
+      )
     end
 
-    # Steps of the mouse and keyboard, run in order as one command.
-    # - +actions+: The steps, in order; the act stops at the first that fails. At least 1 item. At most 100 items.
-    ActRequest = Struct.new(:actions, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "id" => self.id,
+        "object" => self.object,
+        "name" => self.name,
+        "state" => self.state,
+        "labels" => self.labels,
+        "sizeBytes" => self.size_bytes,
+        "storedBytes" => self.stored_bytes,
+        "parentId" => self.parent_id,
+        "attachedTo" => self.attached_to,
+        "createdAt" => self.created_at,
+        "version" => self.version,
+        "tags" => self.tags,
+        "error" => self.error,
+        "deletedAt" => self.deleted_at,
+        "deleteAt" => self.delete_at,
+        "deleteWaitsFor" => self.delete_waits_for,
+        "deleteProtection" => self.delete_protection,
+      }.compact
+    end
+  end
 
-        new(
-          actions: h["actions"]&.map { |i| Action.from(i) },
-        )
-      end
+  # A change to a machine's settings: each field left out stays as it is.
+  # - +name+: Its name, unique in its project.
+  # - +labels+: Its labels, in place of its own; those under `runtime.` are kept.
+  # - +idle_pause_seconds+: Seconds with nothing happening before it pauses, 60 to 86400; 0 never. Nothing happening means no call or command running, no traffic, almost no CPU, and no outbound connection it opened still open.
+  # - +vcpu+: Its vCPUs, grown while it runs; a running machine's vCPUs only grow. At least 1.
+  # - +memory_gb+: Its memory in GB (1 GB is 1,024 MiB), grown while it runs; a running machine's memory only grows. At least 1.
+  # - +disk_gb+: Its disk in GB (1 GB is 1,024 MiB), grown while it runs, its file system with it; a disk only grows. At least 1.
+  # - +user+: Who its commands run as from now when a call names no `user`: `runtime` or `root`. Running ones keep theirs.
+  # - +env+: Environment variables to set, each over its own value, the others kept: the update answers once a running one holds the change (a paused one is given it at its wake), so each process, command and terminal it starts after the answer has them; processes already running keep the environment they started with. At most 32 variables and 32768 bytes of names and values in all, as a create's; values are never answered.
+  # - +remove_env+: Names of environment variables to take out, the same way: gone from the next process it starts; processes already running keep them.
+  # - +max_cost+: The most it may cost in all, in US dollars (`"5.00"`), in place of its own: one paused at its old maxCost wakes at its next call under a higher one.
+  # - +auto_wake+: Whether a call that reaches it paused (an exec, a file, a terminal, a preview's visitor) resumes it from now. false: such a call answers 409 sandbox_paused and it stays paused until its own `:resume`.
+  # - +delete_after_seconds+: Seconds from now until Runtime deletes it, as its delete does: final, and it can't be undone. Sent again before then, it renews it; 0 takes its end off (kept until deleted). At least 0. At most 315360000.
+  # - +delete_protection+: true refuses its delete (409 `delete_protected`) until an update sends false; while true, its time limit pauses it instead of deleting it. Not while it has a `deleteAt`, unless the same update sends `deleteAfterSeconds` 0.
+  MachineUpdate = Struct.new(:name, :labels, :idle_pause_seconds, :vcpu, :memory_gb, :disk_gb, :user, :env, :remove_env, :max_cost, :auto_wake, :delete_after_seconds, :delete_protection, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "actions" => self.actions&.map { |i| i&.to_wire },
-        }.compact
-      end
+      new(
+        name: h["name"],
+        labels: h["labels"],
+        idle_pause_seconds: h["idlePauseSeconds"],
+        vcpu: h["vcpu"],
+        memory_gb: h["memoryGB"],
+        disk_gb: h["diskGB"],
+        user: h["user"],
+        env: h["env"],
+        remove_env: h["removeEnv"],
+        max_cost: h["maxCost"],
+        auto_wake: h["autoWake"],
+        delete_after_seconds: h["deleteAfterSeconds"],
+        delete_protection: h["deleteProtection"],
+      )
     end
 
-    # A point on the screen, in pixels from its top left corner.
-    # - +x+: 
-    # - +y+: 
-    Point = Struct.new(:x, :y, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "name" => self.name,
+        "labels" => self.labels,
+        "idlePauseSeconds" => self.idle_pause_seconds,
+        "vcpu" => self.vcpu,
+        "memoryGB" => self.memory_gb,
+        "diskGB" => self.disk_gb,
+        "user" => self.user,
+        "env" => self.env,
+        "removeEnv" => self.remove_env,
+        "maxCost" => self.max_cost,
+        "autoWake" => self.auto_wake,
+        "deleteAfterSeconds" => self.delete_after_seconds,
+        "deleteProtection" => self.delete_protection,
+      }.compact
+    end
+  end
 
-        new(
-          x: h["x"],
-          y: h["y"],
-        )
-      end
+  # One step of an act: a mouse move, click, drag or scroll, typed text, a key chord, or a wait.
+  # - +type+: What it does: `move` to `x`,`y`; `click` (at `x`,`y` when given, `count` times, with `keys` held); `mouseDown` and `mouseUp` of `button`; `drag` from `x`,`y` to `toX`,`toY`; `scroll` by `dx`,`dy` wheel clicks (at `x`,`y` when given); `type` `text`; `key` the chords in `keys`; `wait` `ms`.
+  # - +x+: Pixels from the screen's left edge. At least 0. At most 16384.
+  # - +y+: Pixels from the screen's top edge. At least 0. At most 16384.
+  # - +to_x+: A drag's end, from the left edge. At least 0. At most 16384.
+  # - +to_y+: A drag's end, from the top edge. At least 0. At most 16384.
+  # - +button+: The mouse button of a click, a drag, a mouseDown or a mouseUp. Default: "left".
+  # - +count+: A click's count: 2 a double click, 3 a triple click. At least 1. At most 3. Default: 1.
+  # - +dx+: A scroll's wheel clicks to the right (negative to the left). At least -100. At most 100.
+  # - +dy+: A scroll's wheel clicks down (negative up). At least -100. At most 100.
+  # - +text+: The text a `type` types, as it is: any Unicode, newlines and tabs. At most 8192 characters.
+  # - +keys+: For `key`, chords pressed in turn, space-separated, each keys joined by `+` in X keysym names (`ctrl+l`, `Return`, `ctrl+shift+t`); for `click` and `scroll`, the modifiers held during it (`shift`, `ctrl+alt`). At most 1000 characters.
+  # - +ms+: A wait's milliseconds. At least 0. At most 10000.
+  Action = Struct.new(:type, :x, :y, :to_x, :to_y, :button, :count, :dx, :dy, :text, :keys, :ms, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "x" => self.x,
-          "y" => self.y,
-        }.compact
-      end
+      new(
+        type: h["type"],
+        x: h["x"],
+        y: h["y"],
+        to_x: h["toX"],
+        to_y: h["toY"],
+        button: h["button"],
+        count: h["count"],
+        dx: h["dx"],
+        dy: h["dy"],
+        text: h["text"],
+        keys: h["keys"],
+        ms: h["ms"],
+      )
     end
 
-    # The screen's size, in pixels.
-    # - +width+: 
-    # - +height+: 
-    ScreenSize = Struct.new(:width, :height, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "type" => self.type,
+        "x" => self.x,
+        "y" => self.y,
+        "toX" => self.to_x,
+        "toY" => self.to_y,
+        "button" => self.button,
+        "count" => self.count,
+        "dx" => self.dx,
+        "dy" => self.dy,
+        "text" => self.text,
+        "keys" => self.keys,
+        "ms" => self.ms,
+      }.compact
+    end
+  end
 
-        new(
-          width: h["width"],
-          height: h["height"],
-        )
-      end
+  # Steps of the mouse and keyboard, run in order as one command.
+  # - +actions+: The steps, in order; the act stops at the first that fails. At least 1 item. At most 100 items.
+  ActRequest = Struct.new(:actions, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "width" => self.width,
-          "height" => self.height,
-        }.compact
-      end
+      new(
+        actions: h["actions"]&.map { |i| Action.from(i) },
+      )
     end
 
-    # The screen once an act's steps ran.
-    # - +cursor+: Where the mouse is.
-    # - +screen+: The screen's size.
-    Acted = Struct.new(:cursor, :screen, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "actions" => self.actions&.map { |i| i&.to_wire },
+      }.compact
+    end
+  end
 
-        new(
-          cursor: Point.from(h["cursor"]),
-          screen: ScreenSize.from(h["screen"]),
-        )
-      end
+  # A point on the screen, in pixels from its top left corner.
+  # - +x+: 
+  # - +y+: 
+  Point = Struct.new(:x, :y, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "cursor" => self.cursor&.to_wire,
-          "screen" => self.screen&.to_wire,
-        }.compact
-      end
+      new(
+        x: h["x"],
+        y: h["y"],
+      )
     end
 
-    # A cell to run.
-    # - +code+: The code. At most 1048576 characters.
-    # - +language+: Its language: `python`. Default: "python".
-    # - +context+: The context it runs in, each its own kernel and state, started on its first cell (`a-z`, `0-9`, `-`, at most 63); `default` when omitted. At least 1 character. At most 63 characters.
-    # - +timeout_seconds+: Seconds it may run before it is interrupted, its context kept: 1 to 50, 45 when omitted. Run longer work as a process (exec with `wait: false`). At least 1. At most 50.
-    RunCode = Struct.new(:code, :language, :context, :timeout_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "x" => self.x,
+        "y" => self.y,
+      }.compact
+    end
+  end
 
-        new(
-          code: h["code"],
-          language: h["language"],
-          context: h["context"],
-          timeout_seconds: h["timeoutSeconds"],
-        )
-      end
+  # The screen's size, in pixels.
+  # - +width+: 
+  # - +height+: 
+  ScreenSize = Struct.new(:width, :height, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "code" => self.code,
-          "language" => self.language,
-          "context" => self.context,
-          "timeoutSeconds" => self.timeout_seconds,
-        }.compact
-      end
+      new(
+        width: h["width"],
+        height: h["height"],
+      )
     end
 
-    # One value a cell returned or displayed, in each form it gave.
-    # - +main+: The cell's own value (its last expression), rather than a display.
-    # - +text+: As plain text (`text/plain`).
-    # - +html+: As HTML (`text/html`): a table, for a DataFrame.
-    # - +markdown+: As Markdown (`text/markdown`).
-    # - +json+: As JSON text (`application/json`).
-    # - +png+: As a PNG image (`image/png`): a chart.
-    # - +jpeg+: As a JPEG image (`image/jpeg`).
-    # - +svg+: As an SVG image (`image/svg+xml`).
-    # - +latex+: As LaTeX (`text/latex`).
-    CodeResult = Struct.new(:main, :text, :html, :markdown, :json, :png, :jpeg, :svg, :latex, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "width" => self.width,
+        "height" => self.height,
+      }.compact
+    end
+  end
 
-        new(
-          main: h["main"],
-          text: h["text"],
-          html: h["html"],
-          markdown: h["markdown"],
-          json: h["json"],
-          png: h["png"],
-          jpeg: h["jpeg"],
-          svg: h["svg"],
-          latex: h["latex"],
-        )
-      end
+  # The screen once an act's steps ran.
+  # - +cursor+: Where the mouse is.
+  # - +screen+: The screen's size.
+  Acted = Struct.new(:cursor, :screen, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "main" => self.main,
-          "text" => self.text,
-          "html" => self.html,
-          "markdown" => self.markdown,
-          "json" => self.json,
-          "png" => self.png,
-          "jpeg" => self.jpeg,
-          "svg" => self.svg,
-          "latex" => self.latex,
-        }.compact
-      end
+      new(
+        cursor: Point.from(h["cursor"]),
+        screen: ScreenSize.from(h["screen"]),
+      )
     end
 
-    # The exception a cell raised.
-    # - +name+: Its name (`ZeroDivisionError`).
-    # - +value+: Its message.
-    # - +traceback+: Its traceback, as text.
-    CodeError = Struct.new(:name, :value, :traceback, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "cursor" => self.cursor&.to_wire,
+        "screen" => self.screen&.to_wire,
+      }.compact
+    end
+  end
 
-        new(
-          name: h["name"],
-          value: h["value"],
-          traceback: h["traceback"],
-        )
-      end
+  # A cell to run.
+  # - +code+: The code. At most 1048576 characters.
+  # - +language+: Its language: `python`. Default: "python".
+  # - +context+: The context it runs in, each its own kernel and state, started on its first cell (`a-z`, `0-9`, `-`, at most 63); `default` when omitted. At least 1 character. At most 63 characters.
+  # - +timeout_seconds+: Seconds it may run before it is interrupted, its context kept: 1 to 50, 45 when omitted. Run longer work as a process (exec with `wait: false`). At least 1. At most 50.
+  RunCode = Struct.new(:code, :language, :context, :timeout_seconds, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "name" => self.name,
-          "value" => self.value,
-          "traceback" => self.traceback,
-        }.compact
-      end
+      new(
+        code: h["code"],
+        language: h["language"],
+        context: h["context"],
+        timeout_seconds: h["timeoutSeconds"],
+      )
     end
 
-    # A cell that ran.
-    # - +context+: The context it ran in.
-    # - +language+: Its language.
-    # - +status+: `ok`; `error`, an exception (`error`); `timeout`, interrupted at its time, its context kept.
-    # - +execution_count+: Its number in its context, as a notebook counts cells.
-    # - +stdout+: What it printed.
-    # - +stderr+: What it wrote to standard error.
-    # - +results+: The values it returned and displayed, in order.
-    # - +error+: The exception it raised.
-    # - +started+: Whether its context's kernel was started for it: its first cell, or one after the kernel ended.
-    # - +duration_seconds+: How long it ran, in seconds.
-    CodeRun = Struct.new(:context, :language, :status, :execution_count, :stdout, :stderr, :results, :error, :started, :duration_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "code" => self.code,
+        "language" => self.language,
+        "context" => self.context,
+        "timeoutSeconds" => self.timeout_seconds,
+      }.compact
+    end
+  end
 
-        new(
-          context: h["context"],
-          language: h["language"],
-          status: h["status"],
-          execution_count: h["executionCount"],
-          stdout: h["stdout"],
-          stderr: h["stderr"],
-          results: h["results"]&.map { |i| CodeResult.from(i) },
-          error: CodeError.from(h["error"]),
-          started: h["started"],
-          duration_seconds: h["durationSeconds"],
-        )
-      end
+  # One value a cell returned or displayed, in each form it gave.
+  # - +main+: The cell's own value (its last expression), rather than a display.
+  # - +text+: As plain text (`text/plain`).
+  # - +html+: As HTML (`text/html`): a table, for a DataFrame.
+  # - +markdown+: As Markdown (`text/markdown`).
+  # - +json+: As JSON text (`application/json`).
+  # - +png+: As a PNG image (`image/png`): a chart.
+  # - +jpeg+: As a JPEG image (`image/jpeg`).
+  # - +svg+: As an SVG image (`image/svg+xml`).
+  # - +latex+: As LaTeX (`text/latex`).
+  CodeResult = Struct.new(:main, :text, :html, :markdown, :json, :png, :jpeg, :svg, :latex, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "context" => self.context,
-          "language" => self.language,
-          "status" => self.status,
-          "executionCount" => self.execution_count,
-          "stdout" => self.stdout,
-          "stderr" => self.stderr,
-          "results" => self.results&.map { |i| i&.to_wire },
-          "error" => self.error&.to_wire,
-          "started" => self.started,
-          "durationSeconds" => self.duration_seconds,
-        }.compact
-      end
+      new(
+        main: h["main"],
+        text: h["text"],
+        html: h["html"],
+        markdown: h["markdown"],
+        json: h["json"],
+        png: h["png"],
+        jpeg: h["jpeg"],
+        svg: h["svg"],
+        latex: h["latex"],
+      )
     end
 
-    # A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused with nothing changing it, a `sandbox.still_paused` event is written for its organization.
-    class Sandboxes
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "main" => self.main,
+        "text" => self.text,
+        "html" => self.html,
+        "markdown" => self.markdown,
+        "json" => self.json,
+        "png" => self.png,
+        "jpeg" => self.jpeg,
+        "svg" => self.svg,
+        "latex" => self.latex,
+      }.compact
+    end
+  end
 
-      # Creates a sandbox. Asked again with the same Idempotency-Key, it returns the same sandbox.
-      def create(vcpu: nil, memory_gb: nil, disk_gb: nil, image: nil, secrets: nil, start: nil, user: nil, volumes: nil, run: nil, name: nil, labels: nil, get_or_create: nil, max_cost: nil, idle_pause_seconds: nil, snapshot: nil, network: nil, env: nil, idempotency_key: nil)
-        Sandbox.from(@transport.request("POST", "/v2/sandboxes", body: { "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "image" => image, "secrets" => secrets, "start" => start, "user" => user, "volumes" => volumes, "run" => run, "name" => name, "labels" => labels, "getOrCreate" => get_or_create, "maxCost" => max_cost, "idlePauseSeconds" => idle_pause_seconds, "snapshot" => snapshot, "network" => network, "env" => env }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+  # The exception a cell raised.
+  # - +name+: Its name (`ZeroDivisionError`).
+  # - +value+: Its message.
+  # - +traceback+: Its traceback, as text.
+  CodeError = Struct.new(:name, :value, :traceback, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      # Returns a sandbox.
-      def get(id, wait: nil, if_state: nil)
-        Sandbox.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true))
-      end
+      new(
+        name: h["name"],
+        value: h["value"],
+        traceback: h["traceback"],
+      )
+    end
 
-      # Lists the project's sandboxes, newest first.
-      def list(state: nil, name: nil, label: nil, cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/sandboxes", query: { "state" => state, "name" => name, "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Sandbox.from(i) }
-      end
+    def to_wire
+      {
+        "name" => self.name,
+        "value" => self.value,
+        "traceback" => self.traceback,
+      }.compact
+    end
+  end
 
-      # Deletes a sandbox, its memory and its disk.
-      def delete(id, idempotency_key: nil)
-        Sandbox.from(@transport.request("DELETE", "/v2/sandboxes/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
-      end
+  # A cell that ran.
+  # - +context+: The context it ran in.
+  # - +language+: Its language.
+  # - +status+: `ok`; `error`, an exception (`error`); `timeout`, interrupted at its time, its context kept.
+  # - +execution_count+: Its number in its context, as a notebook counts cells.
+  # - +stdout+: What it printed.
+  # - +stderr+: What it wrote to standard error.
+  # - +results+: The values it returned and displayed, in order.
+  # - +error+: The exception it raised.
+  # - +started+: Whether its context's kernel was started for it: its first cell, or one after the kernel ended.
+  # - +duration_seconds+: How long it ran, in seconds.
+  CodeRun = Struct.new(:context, :language, :status, :execution_count, :stdout, :stderr, :results, :error, :started, :duration_seconds, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      # Pauses a sandbox with its memory and disk kept. A call to it resumes it.
-      def pause(id, idempotency_key: nil)
-        Sandbox.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:pause", idempotency_key: idempotency_key))
-      end
+      new(
+        context: h["context"],
+        language: h["language"],
+        status: h["status"],
+        execution_count: h["executionCount"],
+        stdout: h["stdout"],
+        stderr: h["stderr"],
+        results: h["results"]&.map { |i| CodeResult.from(i) },
+        error: CodeError.from(h["error"]),
+        started: h["started"],
+        duration_seconds: h["durationSeconds"],
+      )
+    end
 
-      # Resumes a paused sandbox where it was, its memory and processes as they were.
-      def resume(id, idempotency_key: nil)
-        Sandbox.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:resume", idempotency_key: idempotency_key))
-      end
+    def to_wire
+      {
+        "context" => self.context,
+        "language" => self.language,
+        "status" => self.status,
+        "executionCount" => self.execution_count,
+        "stdout" => self.stdout,
+        "stderr" => self.stderr,
+        "results" => self.results&.map { |i| i&.to_wire },
+        "error" => self.error&.to_wire,
+        "started" => self.started,
+        "durationSeconds" => self.duration_seconds,
+      }.compact
+    end
+  end
 
-      # Runs a command as a process and returns it once it ended, with its output; with wait false, at once, while it runs. A paused sandbox is resumed first. Asked again with the same Idempotency-Key, it runs nothing more: it returns the first run's process, waiting for its end while it runs.
-      def exec(id, cmd:, cwd: nil, env: nil, stdin: nil, timeout_seconds: nil, stream: nil, wait: nil, stdin_open: nil, output_encoding: nil, pty: nil, user: nil, idempotency_key: nil)
-        Process.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:exec", body: { "cmd" => cmd, "cwd" => cwd, "env" => env, "stdin" => stdin, "timeoutSeconds" => timeout_seconds, "stream" => stream, "wait" => wait, "stdinOpen" => stdin_open, "outputEncoding" => output_encoding, "pty" => pty, "user" => user }.compact, idempotency_key: idempotency_key, idempotent: true, runs: true, runs_seconds: timeout_seconds))
-      end
+  # A sandbox's files.
+  class SandboxFiles
+    def initialize(client, id)
+      @c = client
+      @id = id
+    end
 
-      # Returns a file's bytes.
-      def read(id, path:)
-        @transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files", query: { "path" => path }, raw: true, idempotent: true)
-      end
+    # Returns a file's bytes.
+    def read(path)
+      @c.read(@id, path: path)
+    end
 
-      # Writes the request's bytes to a file as they come, of any size (Content-Length required), its folders made: the file whole when they all came, or as it was. With offset, they are written into it in place.
-      def write(id, data, path:, mode: nil, offset: nil, sha256: nil, idempotency_key: nil)
-        FileWritten.from(@transport.request("PUT", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files", query: { "path" => path, "mode" => mode, "offset" => offset, "sha256" => sha256 }, data: data, idempotency_key: idempotency_key))
-      end
+    # Writes the request's bytes to a file as they come, of any size (Content-Length required), its folders made: the file whole when they all came, or as it was. With offset, they are written into it in place.
+    def write(path, data, mode: nil, offset: nil, sha256: nil, idempotency_key: nil)
+      @c.write(@id, data, path: path, mode: mode, offset: offset, sha256: sha256, idempotency_key: idempotency_key)
+    end
 
-      # Returns a process's output after a cursor, and the cursor to read on from. The latest 1 MiB is kept; truncated says when the cursor fell behind.
-      def process_output(id, process, cursor: nil, wait_seconds: nil, max_bytes: nil, follow: nil)
-        ProcessOutput.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}/output", query: { "cursor" => cursor, "waitSeconds" => wait_seconds, "maxBytes" => max_bytes, "follow" => follow }, idempotent: true))
-      end
+    # Removes a file, a link or a directory (recursive for one with contents). One missing is success, removed false.
+    def remove(path, recursive: nil, idempotency_key: nil)
+      @c.remove(@id, path: path, recursive: recursive, idempotency_key: idempotency_key)
+    end
 
-      # Sends input to a process started with stdinOpen or a pty, and returns how much of its input it has taken.
-      def write_process(id, process, data: nil, offset: nil, eof: nil, idempotency_key: nil)
-        ProcessWritten.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:write", body: { "data" => data, "offset" => offset, "eof" => eof }.compact, idempotency_key: idempotency_key))
-      end
+    # Returns what is at a path: a file, a directory or a link, or nothing (exists false). With sha256=true, a file's SHA-256 too.
+    def stat(path, sha256: nil)
+      @c.stat(@id, path: path, sha256: sha256)
+    end
 
-      # Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe.
-      def signal_process(id, process, signal: nil, idempotency_key: nil)
-        Process.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:signal", body: { "signal" => signal }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Lists a directory's entries in path order, to a depth.
+    def list(path: nil, depth: nil, limit: nil, hidden: nil, glob: nil)
+      @c.list_files(@id, path: path, depth: depth, limit: limit, hidden: hidden, glob: glob)
+    end
 
-      # Lists a sandbox's processes, newest first: those running and those that ended lately.
-      def list_processes(id)
-        ProcessList.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/processes", idempotent: true))
-      end
+    # Returns a folder as a tar archive (`application/x-tar`, or `application/gzip` with gzip), packed by tar in the sandbox as it streams, of any size; its entries are relative to the folder (`./a.txt`). A folder that fails part way (a file it may not read, or one that changes as it is read) ends as an archive every tar reader refuses, never as a short one that reads whole. At most 4 at once in a sandbox. A paused sandbox is woken first.
+    def download_folder(path, gzip: nil, user: nil, exclude: nil)
+      @c.download_folder(@id, path: path, gzip: gzip, user: user, exclude: exclude)
+    end
 
-      # Removes a file, a link or a directory (recursive for one with contents). One missing is success, removed false.
-      def remove(id, path:, recursive: nil, idempotency_key: nil)
-        FileRemoved.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:remove", body: { "path" => path, "recursive" => recursive }.compact, idempotency_key: idempotency_key))
-      end
+    # Unpacks the request's tar archive (gzip-compressed or not, told by its first bytes) into a folder, made with its parents, by tar in the sandbox as the bytes arrive, of any size, nothing of it kept on disk but what tar writes; returns once tar has ended, or 400 `invalid_archive` with what tar said. A paused sandbox is woken first.
+    def upload_folder(path, data, user: nil, idempotency_key: nil)
+      @c.upload_folder(@id, data, path: path, user: user, idempotency_key: idempotency_key)
+    end
 
-      # Returns what is at a path: a file, a directory or a link, or nothing (exists false). With sha256=true, a file's SHA-256 too.
-      def stat(id, path:, sha256: nil)
-        FileInfo.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/stat", query: { "path" => path, "sha256" => sha256 }, idempotent: true))
-      end
+    # Begins a folder's upload in parts: tar starts in the sandbox, unpacking into the folder each part as it arrives. Send the parts in order by offset (writeFolderUpload), then commitFolderUpload; an upload no call names for 10 minutes is ended. A paused sandbox is woken first.
+    def begin_folder_upload(path, gzip: nil, user: nil, idempotency_key: nil)
+      @c.begin_folder_upload(@id, path: path, gzip: gzip, user: user, idempotency_key: idempotency_key)
+    end
 
-      # Lists a directory's entries in path order, to a depth.
-      def list_files(id, path: nil, depth: nil, limit: nil, hidden: nil, glob: nil)
-        FileList.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/list", query: { "path" => path, "depth" => depth, "limit" => limit, "hidden" => hidden, "glob" => glob }, idempotent: true))
-      end
+    # Sends the request's bytes, a part of the archive at its offset, into tar's input as they arrive, of any size, and returns the bytes received in all once tar took them. A part past them is refused 409 `upload_incomplete`, naming them: send the parts in order.
+    def write_folder_upload(upload, data, offset: nil, idempotency_key: nil)
+      @c.write_folder_upload(@id, upload, data, offset: offset, idempotency_key: idempotency_key)
+    end
 
-      # Returns a folder as a tar archive (`application/x-tar`, or `application/gzip` with gzip), packed by tar in the sandbox as it streams, of any size; its entries are relative to the folder (`./a.txt`). A folder that fails part way (a file it may not read, or one that changes as it is read) ends as an archive every tar reader refuses, never as a short one that reads whole. At most 4 at once in a sandbox. A paused sandbox is woken first.
-      def download_folder(id, path:, gzip: nil, user: nil, exclude: nil)
-        @transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive", query: { "path" => path, "gzip" => gzip, "user" => user, "exclude" => exclude }, raw: true, idempotent: true)
-      end
+    # Ends a folder upload's input and returns once tar has ended, as an exec returns once its command has: the folder, or 400 `invalid_archive` with what tar said. A front that restarts meanwhile returns 503 `run_goes_on`; sent again, it returns how tar ended. An upload no call has named for 10 minutes since its last part or commit is ended.
+    def commit_folder_upload(upload, idempotency_key: nil)
+      @c.commit_folder_upload(@id, upload, idempotency_key: idempotency_key)
+    end
 
-      # Unpacks the request's tar archive (gzip-compressed or not, told by its first bytes) into a folder, made with its parents, by tar in the sandbox as the bytes arrive, of any size, nothing of it kept on disk but what tar writes; returns once tar has ended, or 400 `invalid_archive` with what tar said. A paused sandbox is woken first.
-      def upload_folder(id, data, path:, user: nil, idempotency_key: nil)
-        FolderUnpacked.from(@transport.request("PUT", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive", query: { "path" => path, "user" => user }, data: data, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Stops a folder upload's tar; what it unpacked so far stays.
+    def abort_folder_upload(upload, idempotency_key: nil)
+      @c.abort_folder_upload(@id, upload, idempotency_key: idempotency_key)
+    end
 
-      # Begins a folder's upload in parts: tar starts in the sandbox, unpacking into the folder each part as it arrives. Send the parts in order by offset (writeFolderUpload), then commitFolderUpload; an upload no call names for 10 minutes is ended. A paused sandbox is woken first.
-      def begin_folder_upload(id, path:, gzip: nil, user: nil, idempotency_key: nil)
-        FolderUpload.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive/uploads", body: { "path" => path, "gzip" => gzip, "user" => user }.compact, idempotency_key: idempotency_key))
-      end
+    # Makes a directory, and its parents unless parents is false. One there already is success, created false.
+    def mkdir(path, parents: nil, idempotency_key: nil)
+      @c.mkdir(@id, path: path, parents: parents, idempotency_key: idempotency_key)
+    end
 
-      # Sends the request's bytes, a part of the archive at its offset, into tar's input as they arrive, of any size, and returns the bytes received in all once tar took them. A part past them is refused 409 `upload_incomplete`, naming them: send the parts in order.
-      def write_folder_upload(id, upload, data, offset: nil, idempotency_key: nil)
-        FolderUploadReceived.from(@transport.request("PUT", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}", query: { "offset" => offset }, data: data, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Moves a file, a link or a directory; refused 409 when something is at its new path, unless overwrite. With sha256 or size, a file written in parts is put in place once whole: its writes ended, then only a file of that size with every byte written and whose bytes hash to it moves; refused 409 `upload_incomplete` or `checksum_mismatch`, nothing moved. With sha256, it is safe to send again: once moved, it returns the same answer while `from` is gone and `to` holds those bytes.
+    def rename(from:, to:, overwrite: nil, sha256: nil, size: nil, idempotency_key: nil)
+      @c.rename(@id, from: from, to: to, overwrite: overwrite, sha256: sha256, size: size, idempotency_key: idempotency_key)
+    end
 
-      # Ends a folder upload's input and returns once tar has ended, as an exec returns once its command has: the folder, or 400 `invalid_archive` with what tar said. A front that restarts meanwhile returns 503 `run_goes_on`; sent again, it returns how tar ended. An upload no call has named for 10 minutes since its last part or commit is ended.
-      def commit_folder_upload(id, upload, idempotency_key: nil)
-        FolderUnpacked.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}:commit", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Makes an expiring address for one file that anyone may open with no API key, from a browser, curl or another service: GET downloads it (Range works, so videos play and downloads resume; archive: true downloads a folder as .tar.gz), PUT with the raw body uploads it (up to maxBytes, written whole; Content-Length required). The link acts as the key that made it: an upload link needs write, and the link ends with its key, with revokeLinks or with its sandbox. A paused sandbox is woken for it unless wake is false.
+    def link(path, method: nil, expires_in_seconds: nil, filename: nil, max_bytes: nil, wake: nil, archive: nil, idempotency_key: nil)
+      @c.link(@id, path: path, method: method, expires_in_seconds: expires_in_seconds, filename: filename, max_bytes: max_bytes, wake: wake, archive: archive, idempotency_key: idempotency_key)
+    end
 
-      # Stops a folder upload's tar; what it unpacked so far stays.
-      def abort_folder_upload(id, upload, idempotency_key: nil)
-        FolderUploadAborted.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}:abort", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Ends every file link made for a sandbox so far; links made after work.
+    def revoke_links(idempotency_key: nil)
+      @c.revoke_links(@id, idempotency_key: idempotency_key)
+    end
+  end
 
-      # Makes a directory, and its parents unless parents is false. One there already is success, created false.
-      def mkdir(id, path:, parents: nil, idempotency_key: nil)
-        FileMade.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:mkdir", body: { "path" => path, "parents" => parents }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+  # A sandbox's processes.
+  class SandboxProcesses
+    def initialize(client, id)
+      @c = client
+      @id = id
+    end
 
-      # Moves a file, a link or a directory; refused 409 when something is at its new path, unless overwrite. With sha256 or size, a file written in parts is put in place once whole: its writes ended, then only a file of that size with every byte written and whose bytes hash to it moves; refused 409 `upload_incomplete` or `checksum_mismatch`, nothing moved. With sha256, it is safe to send again: once moved, it returns the same answer while `from` is gone and `to` holds those bytes.
-      def rename(id, from:, to:, overwrite: nil, sha256: nil, size: nil, idempotency_key: nil)
-        FileRenamed.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:rename", body: { "from" => from, "to" => to, "overwrite" => overwrite, "sha256" => sha256, "size" => size }.compact, idempotency_key: idempotency_key))
-      end
+    # Returns a process's output after a cursor, and the cursor to read on from. The latest 1 MiB is kept; truncated says when the cursor fell behind.
+    def output(process, cursor: nil, wait_seconds: nil, max_bytes: nil, follow: nil)
+      @c.process_output(@id, process, cursor: cursor, wait_seconds: wait_seconds, max_bytes: max_bytes, follow: follow)
+    end
 
-      # Makes an expiring address for one file that anyone may open with no API key, from a browser, curl or another service: GET downloads it (Range works, so videos play and downloads resume; archive: true downloads a folder as .tar.gz), PUT with the raw body uploads it (up to maxBytes, written whole; Content-Length required). The link acts as the key that made it: an upload link needs write, and the link ends with its key, with revokeLinks or with its sandbox. A paused sandbox is woken for it unless wake is false.
-      def link(id, path:, method: nil, expires_in_seconds: nil, filename: nil, max_bytes: nil, wake: nil, archive: nil, idempotency_key: nil)
-        FileLink.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:link", body: { "path" => path, "method" => method, "expiresInSeconds" => expires_in_seconds, "filename" => filename, "maxBytes" => max_bytes, "wake" => wake, "archive" => archive }.compact, idempotency_key: idempotency_key))
-      end
+    # Sends input to a process started with stdinOpen or a pty, and returns how much of its input it has taken.
+    def write(process, data: nil, offset: nil, eof: nil, idempotency_key: nil)
+      @c.write_process(@id, process, data: data, offset: offset, eof: eof, idempotency_key: idempotency_key)
+    end
 
-      # Ends every file link made for a sandbox so far; links made after work.
-      def revoke_links(id, idempotency_key: nil)
-        FileLinksRevoked.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:revokeLinks", idempotency_key: idempotency_key))
-      end
+    # Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe.
+    def signal(process, signal: nil, idempotency_key: nil)
+      @c.signal_process(@id, process, signal: signal, idempotency_key: idempotency_key)
+    end
 
-      # Returns where a sandbox may connect out.
-      def get_network(id)
-        SandboxNetwork.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/network", idempotent: true))
-      end
+    # Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe.
+    def resize(process, cols:, rows:, idempotency_key: nil)
+      @c.resize_process(@id, process, cols: cols, rows: rows, idempotency_key: idempotency_key)
+    end
 
-      # Returns a sandbox's CPU, memory, disks and pressure, as its host reads them from the sandbox's own cgroup over a fifth of a second: never a call into the sandbox, so it does not wake a paused one nor keep one from its idle pause. One that is not running has no reading.
-      def metrics(id, range: nil)
-        SandboxMetrics.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/metrics", query: { "range" => range }, idempotent: true))
-      end
+    # Lists a sandbox's processes, newest first: those running and those that ended lately.
+    def list()
+      @c.list_processes(@id)
+    end
+  end
 
-      # Replaces where a sandbox may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut.
-      def set_network(id, allow_outbound: nil, deny_outbound: nil, idempotency_key: nil)
-        SandboxNetwork.from(@transport.request("PUT", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/network", body: { "allowOutbound" => allow_outbound, "denyOutbound" => deny_outbound }.compact, idempotency_key: idempotency_key))
-      end
+  # A sandbox's network.
+  class SandboxNetworkCalls
+    def initialize(client, id)
+      @c = client
+      @id = id
+    end
 
-      # Copies a sandbox as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies.
-      def fork(id, count: nil, name: nil, labels: nil, secrets: nil, max_cost: nil, idle_pause_seconds: nil, idempotency_key: nil)
-        Forked.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:fork", body: { "count" => count, "name" => name, "labels" => labels, "secrets" => secrets, "maxCost" => max_cost, "idlePauseSeconds" => idle_pause_seconds }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Returns where a sandbox may connect out.
+    def get()
+      @c.get_network(@id)
+    end
 
-      # Keeps a sandbox's memory and disk as they are now, a snapshot to start sandboxes from; with `image`, its disk alone as that image's next version. The sandbox runs on. Asked again with the same Idempotency-Key, it returns the same snapshot.
-      def snapshot(id, name: nil, labels: nil, image: nil, start: nil, idempotency_key: nil)
-        Stored.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:snapshot", body: { "name" => name, "labels" => labels, "image" => image, "start" => start }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Replaces where a sandbox may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut.
+    def set(allow_outbound: nil, deny_outbound: nil, idempotency_key: nil)
+      @c.set_network(@id, allow_outbound: allow_outbound, deny_outbound: deny_outbound, idempotency_key: idempotency_key)
+    end
+  end
 
-      # Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412.
-      def update(id, name: nil, labels: nil, idle_pause_seconds: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, user: nil, env: nil, remove_env: nil, max_cost: nil, idempotency_key: nil)
-        Sandbox.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:update", body: { "name" => name, "labels" => labels, "idlePauseSeconds" => idle_pause_seconds, "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "user" => user, "env" => env, "removeEnv" => remove_env, "maxCost" => max_cost }.compact, idempotency_key: idempotency_key))
-      end
+  # A sandbox's previews.
+  class SandboxPreviews
+    def initialize(client, id)
+      @c = client
+      @id = id
+    end
 
-      # Returns what a sandbox's screen shows now, as `image/png` (or `image/jpeg`): its X display `:1`, whole. Refused 409 `display_not_running` when no display runs. A paused sandbox is resumed first.
-      def screenshot(id, format: nil, quality: nil)
-        @transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/screenshot", query: { "format" => format, "quality" => quality }, raw: true, idempotent: true)
-      end
+    # Shares a port of a machine at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview.
+    def create(port, visibility: nil, embed_origins: nil, ttl_seconds: nil, idempotency_key: nil)
+      @c.create(@id, port: port, visibility: visibility, embed_origins: embed_origins, ttl_seconds: ttl_seconds, idempotency_key: idempotency_key)
+    end
+  end
 
-      # Moves, clicks, drags and scrolls the mouse and types on the keyboard of a sandbox's screen (its X display `:1`), each step in turn as one command, and returns where the mouse is then. It stops at the first step that fails, refused 409 `act_failed` naming it; refused 409 `display_not_running` when no display runs. A paused sandbox is resumed first.
-      def act(id, actions:, idempotency_key: nil)
-        Acted.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:act", body: { "actions" => actions }.compact, idempotency_key: idempotency_key))
-      end
+  # One of sandboxes: A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused, counted from its `pausedAt`, a `sandbox.still_paused` event is written for its organization.
+  class Sandbox
+    # What it was when last read, and what is under it.
+    attr_reader :info, :files, :processes, :network, :previews
 
-      # Runs a cell of Python in a sandbox as a notebook does, in a Jupyter kernel it keeps running for the cell's `context`: variables, imports and functions stay for the next cell. Returns what it printed, its values and displays (text, HTML, images such as charts), and its exception with its traceback. The context's kernel starts on its first cell. A cell past `timeoutSeconds` is interrupted and its context kept. Refused 409 `kernel_not_installed` when the image has no ipykernel. A paused sandbox is resumed first.
-      def run_code(id, code:, language: nil, context: nil, timeout_seconds: nil, idempotency_key: nil)
-        CodeRun.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:runCode", body: { "code" => code, "language" => language, "context" => context, "timeoutSeconds" => timeout_seconds }.compact, idempotency_key: idempotency_key))
+    def initialize(client, info)
+      @c = client
+      @info = info
+      @files = SandboxFiles.new(client, info.id)
+      @processes = SandboxProcesses.new(client, info.id)
+      @network = SandboxNetworkCalls.new(client, info.id)
+      @previews = SandboxPreviews.new(Previews.new(client.transport), info.id)
+    end
+
+    # Its id.
+    def id
+      @info.id
+    end
+
+    # Its vCPUs; its product's default when omitted.
+    def vcpu
+      @info.vcpu
+    end
+
+    # Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted.
+    def memory_gb
+      @info.memory_gb
+    end
+
+    # Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger.
+    def disk_gb
+      @info.disk_gb
+    end
+
+    # The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
+    def image
+      @info.image
+    end
+
+    # The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it.
+    def secrets
+      @info.secrets
+    end
+
+    # The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted.
+    def start
+      @info.start
+    end
+
+    # Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
+    def user
+      @info.user
+    end
+
+    # Its product's kind: `sandbox` for a sandbox, `app` for an app, and so on.
+    def object
+      @info.object
+    end
+
+    # Its name, unique in its project.
+    def name
+      @info.name
+    end
+
+    # Where it is.
+    def state
+      @info.state
+    end
+
+    # Its labels.
+    def labels
+      @info.labels
+    end
+
+    # When it was created.
+    def created_at
+      @info.created_at
+    end
+
+    # When it was deleted: a delete's answer alone.
+    def deleted_at
+      @info.deleted_at
+    end
+
+    # Its revision, changed by every change to it: what an update's If-Match names.
+    def revision
+      @info.revision
+    end
+
+    # Seconds with nothing happening before it pauses; 0 never.
+    def idle_pause_seconds
+      @info.idle_pause_seconds
+    end
+
+    # The most it may cost in all, in US dollars; none when it has no such cap.
+    def max_cost
+      @info.max_cost
+    end
+
+    # Whether a call that reaches it paused resumes it; false: only its own resume does, and such a call answers 409 sandbox_paused.
+    def auto_wake
+      @info.auto_wake
+    end
+
+    # Its run's exit code, once its run ended; none for one a signal or its timeout ended.
+    def exit_code
+      @info.exit_code
+    end
+
+    # When its run ended.
+    def ended_at
+      @info.ended_at
+    end
+
+    # When its pause began (or its run ended), while it is paused.
+    def paused_at
+      @info.paused_at
+    end
+
+    # A create's answer alone, for a start with a ready check: how its wait went.
+    def ready
+      @info.ready
+    end
+
+    # When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted.
+    def delete_at
+      @info.delete_at
+    end
+
+    # Whether its delete is refused (409 `delete_protected`) until an update turns this off.
+    def delete_protection
+      @info.delete_protection
+    end
+
+    def inspect
+      "#<Sandbox #{@info.inspect}>"
+    end
+
+    # Returns a sandbox.
+    def refresh(wait: nil, if_state: nil)
+      @info = @c.get(@info.id, wait: wait, if_state: if_state).info
+      self
+    end
+
+    # Deletes a sandbox, its memory and its disk.
+    def delete(idempotency_key: nil)
+      @c.delete(@info.id, idempotency_key: idempotency_key)
+    end
+
+    # Pauses a sandbox with its memory and disk kept. A call to it resumes it.
+    def pause(idempotency_key: nil)
+      @info = @c.pause(@info.id, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Resumes a paused sandbox where it was, its memory and processes as they were.
+    def resume(idempotency_key: nil)
+      @info = @c.resume(@info.id, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Runs a command as a process and returns it once it ended, with its output; with wait false, at once, while it runs. A paused sandbox is resumed first. Asked again with the same Idempotency-Key, it runs nothing more: it returns the first run's process, waiting for its end while it runs.
+    def exec(cmd, cwd: nil, env: nil, stdin: nil, timeout_seconds: nil, stream: nil, wait: nil, stdin_open: nil, output_encoding: nil, pty: nil, user: nil, idempotency_key: nil)
+      @c.exec(@info.id, cmd: cmd, cwd: cwd, env: env, stdin: stdin, timeout_seconds: timeout_seconds, stream: stream, wait: wait, stdin_open: stdin_open, output_encoding: output_encoding, pty: pty, user: user, idempotency_key: idempotency_key)
+    end
+
+    # Returns a sandbox's CPU, memory, disks and pressure, as its host reads them from the sandbox's own cgroup over a fifth of a second: never a call into the sandbox, so it does not wake a paused one nor keep one from its idle pause. One that is not running has no reading.
+    def metrics(range: nil)
+      @c.metrics(@info.id, range: range)
+    end
+
+    # Copies a sandbox as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies.
+    def fork(count: nil, name: nil, labels: nil, secrets: nil, max_cost: nil, idle_pause_seconds: nil, vcpu: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      @c.fork(@info.id, count: count, name: name, labels: labels, secrets: secrets, max_cost: max_cost, idle_pause_seconds: idle_pause_seconds, vcpu: vcpu, delete_after_seconds: delete_after_seconds, delete_protection: delete_protection, idempotency_key: idempotency_key)
+    end
+
+    # Keeps a sandbox's memory and disk as they are now, a snapshot to start sandboxes from; with `image`, its disk alone as that image's next version. The sandbox runs on. Asked again with the same Idempotency-Key, it returns the same snapshot.
+    def snapshot(name: nil, labels: nil, image: nil, start: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      @c.snapshot(@info.id, name: name, labels: labels, image: image, start: start, delete_after_seconds: delete_after_seconds, delete_protection: delete_protection, idempotency_key: idempotency_key)
+    end
+
+    # Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused.
+    def update(name: nil, labels: nil, idle_pause_seconds: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, user: nil, env: nil, remove_env: nil, max_cost: nil, auto_wake: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      @info = @c.update(@info.id, name: name, labels: labels, idle_pause_seconds: idle_pause_seconds, vcpu: vcpu, memory_gb: memory_gb, disk_gb: disk_gb, user: user, env: env, remove_env: remove_env, max_cost: max_cost, auto_wake: auto_wake, delete_after_seconds: delete_after_seconds, delete_protection: delete_protection, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Returns what a sandbox's screen shows now, as `image/png` (or `image/jpeg`): its X display `:1`, whole. Refused 409 `display_not_running` when no display runs. A paused sandbox is resumed first.
+    def screenshot(format: nil, quality: nil)
+      @c.screenshot(@info.id, format: format, quality: quality)
+    end
+
+    # Moves, clicks, drags and scrolls the mouse and types on the keyboard of a sandbox's screen (its X display `:1`), each step in turn as one command, and returns where the mouse is then. It stops at the first step that fails, refused 409 `act_failed` naming it; refused 409 `display_not_running` when no display runs. A paused sandbox is resumed first.
+    def act(actions, idempotency_key: nil)
+      @c.act(@info.id, actions: actions, idempotency_key: idempotency_key)
+    end
+
+    # Runs a cell of Python in a sandbox as a notebook does, in a Jupyter kernel it keeps running for the cell's `context`: variables, imports and functions stay for the next cell. Returns what it printed, its values and displays (text, HTML, images such as charts), and its exception with its traceback. The context's kernel starts on its first cell. A cell past `timeoutSeconds` is interrupted and its context kept. Refused 409 `kernel_not_installed` when the image has no ipykernel. A paused sandbox is resumed first.
+    def run_code(code, language: nil, context: nil, timeout_seconds: nil, idempotency_key: nil)
+      @c.run_code(@info.id, code: code, language: language, context: context, timeout_seconds: timeout_seconds, idempotency_key: idempotency_key)
+    end
+
+    # Runs a command and yields its output as it is written, stdout and stderr in order; once it ends, wait() returns the process with its exit code.
+    def exec_stream(cmd, cwd: nil, env: nil, stdin: nil, timeout_seconds: nil, stream: nil, stdin_open: nil, output_encoding: nil, pty: nil, user: nil)
+      c = @c
+      id = @info.id
+      start = -> { c.exec(id, cmd: cmd, cwd: cwd, env: env, stdin: stdin, timeout_seconds: timeout_seconds, stream: stream, stdin_open: stdin_open, output_encoding: output_encoding, pty: pty, user: user, wait: false) }
+      read = lambda do |t, cursor|
+        a = c.process_output(id, t.id, cursor: cursor, wait_seconds: 8)
+        [a.chunks, a.next_cursor, a.process]
       end
+      Stream.new(start, read, ->(t, cursor) { t.state != "running" && cursor >= t.output_bytes })
+    end
+  end
+
+  # A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused, counted from its `pausedAt`, a `sandbox.still_paused` event is written for its organization.
+  class Sandboxes
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Creates a sandbox. Asked again with the same Idempotency-Key, it returns the same sandbox.
+    def create(vcpu: nil, memory_gb: nil, disk_gb: nil, image: nil, secrets: nil, start: nil, user: nil, volumes: nil, run: nil, name: nil, labels: nil, get_or_create: nil, max_cost: nil, idle_pause_seconds: nil, from: nil, snapshot: nil, network: nil, env: nil, auto_wake: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Sandbox.new(self, SandboxInfo.from(@transport.request("POST", "/v2/sandboxes", body: { "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "image" => image, "secrets" => secrets, "start" => start, "user" => user, "volumes" => volumes, "run" => run, "name" => name, "labels" => labels, "getOrCreate" => get_or_create, "maxCost" => max_cost, "idlePauseSeconds" => idle_pause_seconds, "from" => from, "snapshot" => snapshot, "network" => network, "env" => env, "autoWake" => auto_wake, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true)))
+    end
+
+    # Returns a sandbox.
+    def get(id, wait: nil, if_state: nil)
+      Sandbox.new(self, SandboxInfo.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true)))
+    end
+
+    # Lists the project's sandboxes, newest first.
+    def list(state: nil, name: nil, label: nil, cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/sandboxes", query: { "state" => state, "name" => name, "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| SandboxInfo.from(i) }
+    end
+
+    # Deletes a sandbox, its memory and its disk.
+    def delete(id, idempotency_key: nil)
+      SandboxInfo.from(@transport.request("DELETE", "/v2/sandboxes/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
+    end
+
+    # Pauses a sandbox with its memory and disk kept. A call to it resumes it.
+    def pause(id, idempotency_key: nil)
+      SandboxInfo.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:pause", idempotency_key: idempotency_key))
+    end
+
+    # Resumes a paused sandbox where it was, its memory and processes as they were.
+    def resume(id, idempotency_key: nil)
+      SandboxInfo.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:resume", idempotency_key: idempotency_key))
+    end
+
+    # Runs a command as a process and returns it once it ended, with its output; with wait false, at once, while it runs. A paused sandbox is resumed first. Asked again with the same Idempotency-Key, it runs nothing more: it returns the first run's process, waiting for its end while it runs.
+    def exec(id, cmd:, cwd: nil, env: nil, stdin: nil, timeout_seconds: nil, stream: nil, wait: nil, stdin_open: nil, output_encoding: nil, pty: nil, user: nil, idempotency_key: nil)
+      Process.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:exec", body: { "cmd" => cmd, "cwd" => cwd, "env" => env, "stdin" => stdin, "timeoutSeconds" => timeout_seconds, "stream" => stream, "wait" => wait, "stdinOpen" => stdin_open, "outputEncoding" => output_encoding, "pty" => pty, "user" => user }.compact, idempotency_key: idempotency_key, idempotent: true, runs: true, runs_seconds: timeout_seconds))
+    end
+
+    # Returns a file's bytes.
+    def read(id, path:)
+      @transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files", query: { "path" => path }, raw: true, idempotent: true)
+    end
+
+    # Writes the request's bytes to a file as they come, of any size (Content-Length required), its folders made: the file whole when they all came, or as it was. With offset, they are written into it in place.
+    def write(id, data, path:, mode: nil, offset: nil, sha256: nil, idempotency_key: nil)
+      FileWritten.from(@transport.request("PUT", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files", query: { "path" => path, "mode" => mode, "offset" => offset, "sha256" => sha256 }, data: data, idempotency_key: idempotency_key))
+    end
+
+    # Returns a process's output after a cursor, and the cursor to read on from. The latest 1 MiB is kept; truncated says when the cursor fell behind.
+    def process_output(id, process, cursor: nil, wait_seconds: nil, max_bytes: nil, follow: nil)
+      ProcessOutput.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}/output", query: { "cursor" => cursor, "waitSeconds" => wait_seconds, "maxBytes" => max_bytes, "follow" => follow }, idempotent: true))
+    end
+
+    # Sends input to a process started with stdinOpen or a pty, and returns how much of its input it has taken.
+    def write_process(id, process, data: nil, offset: nil, eof: nil, idempotency_key: nil)
+      ProcessWritten.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:write", body: { "data" => data, "offset" => offset, "eof" => eof }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe.
+    def signal_process(id, process, signal: nil, idempotency_key: nil)
+      Process.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:signal", body: { "signal" => signal }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe.
+    def resize_process(id, process, cols:, rows:, idempotency_key: nil)
+      Process.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:resize", body: { "cols" => cols, "rows" => rows }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Lists a sandbox's processes, newest first: those running and those that ended lately.
+    def list_processes(id)
+      ProcessList.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/processes", idempotent: true))
+    end
+
+    # Removes a file, a link or a directory (recursive for one with contents). One missing is success, removed false.
+    def remove(id, path:, recursive: nil, idempotency_key: nil)
+      FileRemoved.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:remove", body: { "path" => path, "recursive" => recursive }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Returns what is at a path: a file, a directory or a link, or nothing (exists false). With sha256=true, a file's SHA-256 too.
+    def stat(id, path:, sha256: nil)
+      FileInfo.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/stat", query: { "path" => path, "sha256" => sha256 }, idempotent: true))
+    end
+
+    # Lists a directory's entries in path order, to a depth.
+    def list_files(id, path: nil, depth: nil, limit: nil, hidden: nil, glob: nil)
+      FileList.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/list", query: { "path" => path, "depth" => depth, "limit" => limit, "hidden" => hidden, "glob" => glob }, idempotent: true))
+    end
+
+    # Returns a folder as a tar archive (`application/x-tar`, or `application/gzip` with gzip), packed by tar in the sandbox as it streams, of any size; its entries are relative to the folder (`./a.txt`). A folder that fails part way (a file it may not read, or one that changes as it is read) ends as an archive every tar reader refuses, never as a short one that reads whole. At most 4 at once in a sandbox. A paused sandbox is woken first.
+    def download_folder(id, path:, gzip: nil, user: nil, exclude: nil)
+      @transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive", query: { "path" => path, "gzip" => gzip, "user" => user, "exclude" => exclude }, raw: true, idempotent: true)
+    end
+
+    # Unpacks the request's tar archive (gzip-compressed or not, told by its first bytes) into a folder, made with its parents, by tar in the sandbox as the bytes arrive, of any size, nothing of it kept on disk but what tar writes; returns once tar has ended, or 400 `invalid_archive` with what tar said. A paused sandbox is woken first.
+    def upload_folder(id, data, path:, user: nil, idempotency_key: nil)
+      FolderUnpacked.from(@transport.request("PUT", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive", query: { "path" => path, "user" => user }, data: data, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Begins a folder's upload in parts: tar starts in the sandbox, unpacking into the folder each part as it arrives. Send the parts in order by offset (writeFolderUpload), then commitFolderUpload; an upload no call names for 10 minutes is ended. A paused sandbox is woken first.
+    def begin_folder_upload(id, path:, gzip: nil, user: nil, idempotency_key: nil)
+      FolderUpload.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive/uploads", body: { "path" => path, "gzip" => gzip, "user" => user }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Sends the request's bytes, a part of the archive at its offset, into tar's input as they arrive, of any size, and returns the bytes received in all once tar took them. A part past them is refused 409 `upload_incomplete`, naming them: send the parts in order.
+    def write_folder_upload(id, upload, data, offset: nil, idempotency_key: nil)
+      FolderUploadReceived.from(@transport.request("PUT", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}", query: { "offset" => offset }, data: data, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Ends a folder upload's input and returns once tar has ended, as an exec returns once its command has: the folder, or 400 `invalid_archive` with what tar said. A front that restarts meanwhile returns 503 `run_goes_on`; sent again, it returns how tar ended. An upload no call has named for 10 minutes since its last part or commit is ended.
+    def commit_folder_upload(id, upload, idempotency_key: nil)
+      FolderUnpacked.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}:commit", idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Stops a folder upload's tar; what it unpacked so far stays.
+    def abort_folder_upload(id, upload, idempotency_key: nil)
+      FolderUploadAborted.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}:abort", idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Makes a directory, and its parents unless parents is false. One there already is success, created false.
+    def mkdir(id, path:, parents: nil, idempotency_key: nil)
+      FileMade.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:mkdir", body: { "path" => path, "parents" => parents }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Moves a file, a link or a directory; refused 409 when something is at its new path, unless overwrite. With sha256 or size, a file written in parts is put in place once whole: its writes ended, then only a file of that size with every byte written and whose bytes hash to it moves; refused 409 `upload_incomplete` or `checksum_mismatch`, nothing moved. With sha256, it is safe to send again: once moved, it returns the same answer while `from` is gone and `to` holds those bytes.
+    def rename(id, from:, to:, overwrite: nil, sha256: nil, size: nil, idempotency_key: nil)
+      FileRenamed.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:rename", body: { "from" => from, "to" => to, "overwrite" => overwrite, "sha256" => sha256, "size" => size }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Makes an expiring address for one file that anyone may open with no API key, from a browser, curl or another service: GET downloads it (Range works, so videos play and downloads resume; archive: true downloads a folder as .tar.gz), PUT with the raw body uploads it (up to maxBytes, written whole; Content-Length required). The link acts as the key that made it: an upload link needs write, and the link ends with its key, with revokeLinks or with its sandbox. A paused sandbox is woken for it unless wake is false.
+    def link(id, path:, method: nil, expires_in_seconds: nil, filename: nil, max_bytes: nil, wake: nil, archive: nil, idempotency_key: nil)
+      FileLink.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:link", body: { "path" => path, "method" => method, "expiresInSeconds" => expires_in_seconds, "filename" => filename, "maxBytes" => max_bytes, "wake" => wake, "archive" => archive }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Ends every file link made for a sandbox so far; links made after work.
+    def revoke_links(id, idempotency_key: nil)
+      FileLinksRevoked.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/files:revokeLinks", idempotency_key: idempotency_key))
+    end
+
+    # Returns where a sandbox may connect out.
+    def get_network(id)
+      SandboxNetwork.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/network", idempotent: true))
+    end
+
+    # Returns a sandbox's CPU, memory, disks and pressure, as its host reads them from the sandbox's own cgroup over a fifth of a second: never a call into the sandbox, so it does not wake a paused one nor keep one from its idle pause. One that is not running has no reading.
+    def metrics(id, range: nil)
+      SandboxMetrics.from(@transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/metrics", query: { "range" => range }, idempotent: true))
+    end
+
+    # Replaces where a sandbox may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut.
+    def set_network(id, allow_outbound: nil, deny_outbound: nil, idempotency_key: nil)
+      SandboxNetwork.from(@transport.request("PUT", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/network", body: { "allowOutbound" => allow_outbound, "denyOutbound" => deny_outbound }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Copies a sandbox as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies.
+    def fork(id, count: nil, name: nil, labels: nil, secrets: nil, max_cost: nil, idle_pause_seconds: nil, vcpu: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Forked.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:fork", body: { "count" => count, "name" => name, "labels" => labels, "secrets" => secrets, "maxCost" => max_cost, "idlePauseSeconds" => idle_pause_seconds, "vcpu" => vcpu, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Keeps a sandbox's memory and disk as they are now, a snapshot to start sandboxes from; with `image`, its disk alone as that image's next version. The sandbox runs on. Asked again with the same Idempotency-Key, it returns the same snapshot.
+    def snapshot(id, name: nil, labels: nil, image: nil, start: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Stored.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:snapshot", body: { "name" => name, "labels" => labels, "image" => image, "start" => start, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused.
+    def update(id, name: nil, labels: nil, idle_pause_seconds: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, user: nil, env: nil, remove_env: nil, max_cost: nil, auto_wake: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      SandboxInfo.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:update", body: { "name" => name, "labels" => labels, "idlePauseSeconds" => idle_pause_seconds, "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "user" => user, "env" => env, "removeEnv" => remove_env, "maxCost" => max_cost, "autoWake" => auto_wake, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Returns what a sandbox's screen shows now, as `image/png` (or `image/jpeg`): its X display `:1`, whole. Refused 409 `display_not_running` when no display runs. A paused sandbox is resumed first.
+    def screenshot(id, format: nil, quality: nil)
+      @transport.request("GET", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/screenshot", query: { "format" => format, "quality" => quality }, raw: true, idempotent: true)
+    end
+
+    # Moves, clicks, drags and scrolls the mouse and types on the keyboard of a sandbox's screen (its X display `:1`), each step in turn as one command, and returns where the mouse is then. It stops at the first step that fails, refused 409 `act_failed` naming it; refused 409 `display_not_running` when no display runs. A paused sandbox is resumed first.
+    def act(id, actions:, idempotency_key: nil)
+      Acted.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:act", body: { "actions" => actions }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Runs a cell of Python in a sandbox as a notebook does, in a Jupyter kernel it keeps running for the cell's `context`: variables, imports and functions stay for the next cell. Returns what it printed, its values and displays (text, HTML, images such as charts), and its exception with its traceback. The context's kernel starts on its first cell. A cell past `timeoutSeconds` is interrupted and its context kept. Refused 409 `kernel_not_installed` when the image has no ipykernel. A paused sandbox is resumed first.
+    def run_code(id, code:, language: nil, context: nil, timeout_seconds: nil, idempotency_key: nil)
+      CodeRun.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}:runCode", body: { "code" => code, "language" => language, "context" => context, "timeoutSeconds" => timeout_seconds }.compact, idempotency_key: idempotency_key))
     end
   end
 end

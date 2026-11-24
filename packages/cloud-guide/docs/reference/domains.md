@@ -1,6 +1,6 @@
 # Domain API reference
 
-Your own hostname serving a sandbox's port, with HTTPS.
+Your own hostname serving a machine's port, with HTTPS.
 
 Base URL: `https://api.withruntime.com`. [Authentication, idempotency and errors](./overview) work the same way for every product.
 
@@ -20,7 +20,7 @@ Its states: `making`, `ready`, `deleted`.
 
 `POST /v2/domains`
 
-Adds a hostname to serve a sandbox's port, checks its TXT record, and returns the DNS records to set. Asked again with another sandbox or port, it points the name there.
+Adds a hostname to serve a machine's port, checks its TXT record, and returns the DNS records to set. Asked again with another machine or port, it points the name there.
 
 Its action, for a key's grant: `domains:create`.
 
@@ -56,8 +56,8 @@ result = runtime.domains.create(hostname="example", sandbox_id="SANDBOX_ID", por
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.domains.create(hostname: "example", sandbox_id: "SANDBOX_ID", port: 3000)
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.domains.create(hostname: "example", sandbox_id: "SANDBOX_ID", port: 3000)
 ```
 
 ```bash title="CLI"
@@ -105,8 +105,8 @@ result = runtime.domains.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.domains.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.domains.list
 ```
 
 ```bash title="CLI"
@@ -122,6 +122,13 @@ Returns a custom domain and the DNS records it needs.
 Its action, for a key's grant: `domains:get`.
 
 Path: `hostname`.
+
+Query:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `wait` | number | No | Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. |
+| `ifState` | string | No | The state the caller last read, which `wait` waits for it to leave. |
 
 Returns a [Domain](#domain).
 
@@ -151,8 +158,8 @@ result = runtime.domains.get("HOSTNAME_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.domains.get("HOSTNAME_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.domains.get("HOSTNAME_ID")
 ```
 
 ```bash title="CLI"
@@ -197,8 +204,8 @@ result = runtime.domains.verify("HOSTNAME_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.domains.verify("HOSTNAME_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.domains.verify("HOSTNAME_ID")
 ```
 
 ```bash title="CLI"
@@ -243,8 +250,8 @@ result = runtime.domains.delete("HOSTNAME_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.domains.delete("HOSTNAME_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.domains.delete("HOSTNAME_ID")
 ```
 
 ```bash title="CLI"
@@ -255,13 +262,13 @@ runtime domains delete HOSTNAME_ID
 
 ### DomainCreate
 
-A custom domain to add, or to point at another sandbox or port.
+A custom domain to add, or to point at another machine or port.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `hostname` | string | Yes | The hostname, at most 253 characters. |
-| `sandboxId` | string | Yes | The sandbox to serve. |
-| `port` | integer | Yes | The port inside the sandbox, 1 to 65535. |
+| `sandboxId` | string | Yes | The machine to serve. |
+| `port` | integer | Yes | The port inside the machine, 1 to 65535. |
 
 ### DomainSettings
 
@@ -269,7 +276,7 @@ A custom domain's settings, as it keeps them: the port it serves, and its proof 
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `port` | integer | Yes | The port inside the sandbox. At least 1. At most 65535. |
+| `port` | integer | Yes | The port inside the machine. At least 1. At most 65535. |
 | `token` | string | Yes | The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`. |
 | `verifiedAt` | string (RFC 3339) | No | When the TXT record was last found to hold the token; none until it is. |
 | `checkedAt` | string (RFC 3339) | No | When the TXT record was last looked up. |
@@ -277,11 +284,11 @@ A custom domain's settings, as it keeps them: the port it serves, and its proof 
 
 ### Domain
 
-A custom domain: your own hostname serving a sandbox's port.
+A custom domain: your own hostname serving a machine's port.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `port` | integer | Yes | The port inside the sandbox. At least 1. At most 65535. |
+| `port` | integer | Yes | The port inside the machine. At least 1. At most 65535. |
 | `token` | string | Yes | The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`. |
 | `verifiedAt` | string (RFC 3339) | No | When the TXT record was last found to hold the token; none until it is. |
 | `checkedAt` | string (RFC 3339) | No | When the TXT record was last looked up. |
@@ -289,7 +296,7 @@ A custom domain: your own hostname serving a sandbox's port.
 | `id` | string | Yes | Its ID. |
 | `object` | one of `domain` | Yes | Always `domain`. |
 | `hostname` | string | Yes | The hostname, lower case. |
-| `sandboxId` | string | Yes | The sandbox it serves. |
+| `sandboxId` | string | Yes | The machine it serves. |
 | `state` | one of `making`, `ready`, `deleted` | Yes | Its state: `ready` once every serving host routes it. |
 | `disabled` | boolean | Yes | Turned off by Runtime. |
 | `createdAt` | string (RFC 3339) | Yes | When it was added. |

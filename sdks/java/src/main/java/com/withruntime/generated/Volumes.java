@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import com.withruntime.generated.Sandboxes.Stored;
+import com.withruntime.generated.Snapshots.StoredUpdate;
 
 /** A disk that outlives the machines it is attached to. */
 public final class Volumes {
@@ -27,6 +28,12 @@ public final class Volumes {
     /** Its size in MiB, 64 to 409600 (400 GiB). */
     public Long sizeMiB;
 
+    /** Seconds until Runtime deletes it and what it holds, as its delete does: final, and it can't be undone; one attached to a machine is deleted once that machine ends. 0 or omitted: kept until deleted. At least 0. At most 315360000. */
+    public Long deleteAfterSeconds;
+
+    /** Whether its delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`. */
+    public Boolean deleteProtection;
+
     public VolumeCreate name(String v) {
       this.name = v;
       return this;
@@ -42,12 +49,24 @@ public final class Volumes {
       return this;
     }
 
+    public VolumeCreate deleteAfterSeconds(Long v) {
+      this.deleteAfterSeconds = v;
+      return this;
+    }
+
+    public VolumeCreate deleteProtection(Boolean v) {
+      this.deleteProtection = v;
+      return this;
+    }
+
     static VolumeCreate of(Object raw) {
       Map<String, Object> m = KitJson.object(raw);
       VolumeCreate o = new VolumeCreate();
       o.name = KitJson.asString(m.get("name"));
       o.labels = KitJson.asStringMap(m.get("labels"));
       o.sizeMiB = KitJson.asLong(m.get("sizeMiB"));
+      o.deleteAfterSeconds = KitJson.asLong(m.get("deleteAfterSeconds"));
+      o.deleteProtection = (m.get("deleteProtection") instanceof Boolean b ? b : null);
       return o;
     }
 
@@ -56,6 +75,8 @@ public final class Volumes {
       if (name != null) m.put("name", name);
       if (labels != null) m.put("labels", labels);
       if (sizeMiB != null) m.put("sizeMiB", sizeMiB);
+      if (deleteAfterSeconds != null) m.put("deleteAfterSeconds", deleteAfterSeconds);
+      if (deleteProtection != null) m.put("deleteProtection", deleteProtection);
       return m;
     }
   }
@@ -113,6 +134,32 @@ public final class Volumes {
     }
   }
 
+  /** What get takes in its query. */
+  public static final class VolumeGetQuery {
+    /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+    public Double wait;
+
+    /** The state the caller last read, which `wait` waits for it to leave. */
+    public String ifState;
+
+    public VolumeGetQuery wait(Double v) {
+      this.wait = v;
+      return this;
+    }
+
+    public VolumeGetQuery ifState(String v) {
+      this.ifState = v;
+      return this;
+    }
+
+    Map<String, Object> query() {
+      Map<String, Object> q = new LinkedHashMap<>();
+      if (wait != null) q.put("wait", String.valueOf(wait));
+      if (ifState != null) q.put("ifState", String.valueOf(ifState));
+      return q;
+    }
+  }
+
   /** Creates an empty volume. Asked again with the same Idempotency-Key, it returns the same one. */
   public Stored create(VolumeCreate input, Transport.RequestOptions opts) {
     return Stored.of(t.request("POST", "/v2/volumes", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
@@ -124,13 +171,18 @@ public final class Volumes {
   }
 
   /** Returns a volume. */
-  public Stored get(String id, Transport.RequestOptions opts) {
-    return Stored.of(t.request("GET", "/v2/volumes/" + Transport.path(id), null, null, new Transport.Call(true, null), opts));
+  public Stored get(String id, VolumeGetQuery query, Transport.RequestOptions opts) {
+    return Stored.of(t.request("GET", "/v2/volumes/" + Transport.path(id), query == null ? null : query.query(), null, new Transport.Call(true, null), opts));
   }
 
-  /** Deletes a volume and what it holds. One attached to a sandbox is refused: delete the sandbox first. */
+  /** Deletes a volume and what it holds. One attached to a machine is refused: delete the machine first. */
   public Stored delete(String id, Transport.RequestOptions opts) {
     return Stored.of(t.request("DELETE", "/v2/volumes/" + Transport.path(id), null, null, new Transport.Call(false, null), opts));
+  }
+
+  /** Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is. */
+  public Stored update(String id, StoredUpdate input, Transport.RequestOptions opts) {
+    return Stored.of(t.request("POST", "/v2/volumes/" + Transport.path(id) + ":update", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
 }

@@ -5,283 +5,388 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # One meter's use and charges this month.
-    # - +meter+: The card's meter (`cpu`, `memory`, `traffic-out`, ...).
-    # - +quantity+: Used this month, in the meter's base unit, as an integer in text.
-    # - +unit+: The base unit: `core-microseconds`, `vcpu-microseconds`, `byte-seconds`, `bytes`, `calls` or `seconds`.
-    # - +charged+: Charged this month at the card's rate, in US dollars.
-    MeterUse = Struct.new(:meter, :quantity, :unit, :charged, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # One meter's use and charges this month.
+  # - +meter+: The card's meter (`cpu`, `memory`, `traffic-out`, ...).
+  # - +quantity+: Used this month, in the meter's base unit, as an integer in text.
+  # - +unit+: The base unit: `core-microseconds`, `vcpu-microseconds`, `byte-seconds`, `bytes`, `calls` or `seconds`.
+  # - +charged+: Charged this month at the card's rate, in US dollars.
+  MeterUse = Struct.new(:meter, :quantity, :unit, :charged, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          meter: h["meter"],
-          quantity: h["quantity"],
-          unit: h["unit"],
-          charged: h["charged"],
-        )
-      end
-
-      def to_wire
-        {
-          "meter" => self.meter,
-          "quantity" => self.quantity,
-          "unit" => self.unit,
-          "charged" => self.charged,
-        }.compact
-      end
+      new(
+        meter: h["meter"],
+        quantity: h["quantity"],
+        unit: h["unit"],
+        charged: h["charged"],
+      )
     end
 
-    # One limit the org is held to, and what it uses of it now.
-    # - +name+: `running.vcpus`, `running.memory`, `machine.vcpus`, `machine.memory` or `starts.per-second`.
-    # - +unit+: What `max` and `used` count.
-    # - +max+: The most it may hold; none for no limit.
-    # - +used+: What it holds now.
-    Limit = Struct.new(:name, :unit, :max, :used, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "meter" => self.meter,
+        "quantity" => self.quantity,
+        "unit" => self.unit,
+        "charged" => self.charged,
+      }.compact
+    end
+  end
 
-        new(
-          name: h["name"],
-          unit: h["unit"],
-          max: h["max"],
-          used: h["used"],
-        )
-      end
+  # One limit the org is held to, and what it uses of it now.
+  # - +name+: `running.vcpus`, `running.memory`, `machine.vcpus`, `machine.memory` or `starts.per-second`.
+  # - +unit+: What `max` and `used` count.
+  # - +max+: The most it may hold; none for no limit.
+  # - +used+: What it holds now.
+  Limit = Struct.new(:name, :unit, :max, :used, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "name" => self.name,
-          "unit" => self.unit,
-          "max" => self.max,
-          "used" => self.used,
-        }.compact
-      end
+      new(
+        name: h["name"],
+        unit: h["unit"],
+        max: h["max"],
+        used: h["used"],
+      )
     end
 
-    # One key's spend and what its holder runs: a coordinator reads what each worker's key spent.
-    # - +key_id+: The key's ID.
-    # - +name+: Its name.
-    # - +agent_id+: The agent or CI pipeline it acts as.
-    # - +account_id+: The person it acts as or for.
-    # - +day_spent+: What its calls committed in the last 24 hours, in US dollars, as its spend caps count it.
-    # - +period_spent+: What its calls committed this month (UTC), in US dollars.
-    # - +running+: Its holder's machines running now.
-    # - +machines+: Its holder's machines, not deleted.
-    KeyUsage = Struct.new(:key_id, :name, :agent_id, :account_id, :day_spent, :period_spent, :running, :machines, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "name" => self.name,
+        "unit" => self.unit,
+        "max" => self.max,
+        "used" => self.used,
+      }.compact
+    end
+  end
 
-        new(
-          key_id: h["keyId"],
-          name: h["name"],
-          agent_id: h["agentId"],
-          account_id: h["accountId"],
-          day_spent: h["daySpent"],
-          period_spent: h["periodSpent"],
-          running: h["running"],
-          machines: h["machines"],
-        )
-      end
+  # One key's spend and what its holder runs: a coordinator reads what each worker's key spent.
+  # - +key_id+: The key's ID.
+  # - +name+: Its name.
+  # - +agent_id+: The agent or CI pipeline it acts as.
+  # - +account_id+: The person it acts as or for.
+  # - +day_spent+: What its calls committed in the last 24 hours, in US dollars, as its spend caps count it.
+  # - +period_spent+: What its calls committed this month (UTC), in US dollars.
+  # - +running+: Its holder's machines running now.
+  # - +machines+: Its holder's machines, not deleted.
+  KeyUsage = Struct.new(:key_id, :name, :agent_id, :account_id, :day_spent, :period_spent, :running, :machines, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "keyId" => self.key_id,
-          "name" => self.name,
-          "agentId" => self.agent_id,
-          "accountId" => self.account_id,
-          "daySpent" => self.day_spent,
-          "periodSpent" => self.period_spent,
-          "running" => self.running,
-          "machines" => self.machines,
-        }.compact
-      end
+      new(
+        key_id: h["keyId"],
+        name: h["name"],
+        agent_id: h["agentId"],
+        account_id: h["accountId"],
+        day_spent: h["daySpent"],
+        period_spent: h["periodSpent"],
+        running: h["running"],
+        machines: h["machines"],
+      )
     end
 
-    # The spend cap a key's creates are held to, and what is left under it.
-    # - +cap+: The most its holder's sandboxes may spend over windowSeconds, in US dollars.
-    # - +spent+: What they spent over the window, in US dollars, as the cap counts it.
-    # - +remaining+: What is left: cap less spent, never below 0. Once 0, a create is refused 403 until the window passes it.
-    # - +window_seconds+: The rolling window the cap counts over, in seconds.
-    KeySpendCap = Struct.new(:cap, :spent, :remaining, :window_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "keyId" => self.key_id,
+        "name" => self.name,
+        "agentId" => self.agent_id,
+        "accountId" => self.account_id,
+        "daySpent" => self.day_spent,
+        "periodSpent" => self.period_spent,
+        "running" => self.running,
+        "machines" => self.machines,
+      }.compact
+    end
+  end
 
-        new(
-          cap: h["cap"],
-          spent: h["spent"],
-          remaining: h["remaining"],
-          window_seconds: h["windowSeconds"],
-        )
-      end
+  # The spend cap a key's creates are held to, and what is left under it.
+  # - +cap+: The most its holder's machines may spend over windowSeconds, in US dollars.
+  # - +spent+: What they spent over the window, in US dollars, as the cap counts it.
+  # - +remaining+: What is left: cap less spent, never below 0. Once 0, a create is refused 403 until the window passes it.
+  # - +window_seconds+: The rolling window the cap counts over, in seconds.
+  KeySpendCap = Struct.new(:cap, :spent, :remaining, :window_seconds, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "cap" => self.cap,
-          "spent" => self.spent,
-          "remaining" => self.remaining,
-          "windowSeconds" => self.window_seconds,
-        }.compact
-      end
+      new(
+        cap: h["cap"],
+        spent: h["spent"],
+        remaining: h["remaining"],
+        window_seconds: h["windowSeconds"],
+      )
     end
 
-    # What the org has used and has left, at the card's prices.
-    # - +org_id+: The organization.
-    # - +period_start+: The month's first moment (UTC).
-    # - +credited+: Every credit ever added, in US dollars.
-    # - +spent+: Every charge ever settled, in US dollars.
-    # - +available+: What can still be spent: credited less spent, in US dollars.
-    # - +period_spent+: Charged this month, in US dollars.
-    # - +meters+: This month's use and charges by meter.
-    # - +plan+: Its plan on the price card.
-    # - +limits+: Every limit it is held to, with what it uses of each now: the figures a create past one is refused by.
-    # - +spend_cap+: The org's own cap on a month's charges, in US dollars.
-    # - +key+: One key's spend, when the call names it (`key`).
-    # - +key_spend_cap+: The spend cap this key's creates are held to: the tightest of its own, those of the keys it was made with, and its holder's grants'. Omitted when none holds it.
-    Usage = Struct.new(:org_id, :period_start, :credited, :spent, :available, :period_spent, :meters, :plan, :limits, :spend_cap, :key, :key_spend_cap, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "cap" => self.cap,
+        "spent" => self.spent,
+        "remaining" => self.remaining,
+        "windowSeconds" => self.window_seconds,
+      }.compact
+    end
+  end
 
-        new(
-          org_id: h["orgId"],
-          period_start: h["periodStart"],
-          credited: h["credited"],
-          spent: h["spent"],
-          available: h["available"],
-          period_spent: h["periodSpent"],
-          meters: h["meters"]&.map { |i| MeterUse.from(i) },
-          plan: h["plan"],
-          limits: h["limits"]&.map { |i| Limit.from(i) },
-          spend_cap: h["spendCap"],
-          key: KeyUsage.from(h["key"]),
-          key_spend_cap: KeySpendCap.from(h["keySpendCap"]),
-        )
-      end
+  # One product's use in one hour, at the card's prices.
+  # - +at+: The hour's first moment (UTC).
+  # - +product+: What it was used by: the machine's kind (`sandbox`, `app`, `function`, `ci`, ...), what is kept on disk (`disk`, `volume`, `snapshot`, `image`), or `traffic`, what was sent out; `machine` or `storage` when what used it was deleted too long ago to name.
+  # - +charged+: What it costs on the price card, before any credit, in US dollars.
+  UsageHour = Struct.new(:at, :product, :charged, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "orgId" => self.org_id,
-          "periodStart" => self.period_start,
-          "credited" => self.credited,
-          "spent" => self.spent,
-          "available" => self.available,
-          "periodSpent" => self.period_spent,
-          "meters" => self.meters&.map { |i| i&.to_wire },
-          "plan" => self.plan,
-          "limits" => self.limits&.map { |i| i&.to_wire },
-          "spendCap" => self.spend_cap,
-          "key" => self.key&.to_wire,
-          "keySpendCap" => self.key_spend_cap&.to_wire,
-        }.compact
-      end
+      new(
+        at: h["at"],
+        product: h["product"],
+        charged: h["charged"],
+      )
     end
 
-    # One meter of one machine's, disk's or address's hour, as measured, at the card's price.
-    # - +id+: The line's ID: the same line has the same ID on every read.
-    # - +subject_id+: The resource it was used by: a machine, a disk or an address.
-    # - +resource_id+: The ID its product names it by (a sandbox's own ID).
-    # - +project_id+: Its project.
-    # - +meter+: The card's meter (`cpu`, `memory`, `standard`, `traffic-out`, ...).
-    # - +starts_at+: The hour's first moment (UTC).
-    # - +ends_at+: The hour's end.
-    # - +quantity+: What was used, in the meter's base unit, as an integer in text.
-    # - +unit+: The base unit: `core-microseconds`, `vcpu-microseconds`, `byte-seconds`, `bytes`, `calls` or `seconds`.
-    # - +charged_micros+: The hour alone at the card's rate, rounded down, in integer microdollars as text.
-    # - +rate_micros+: The card's rate, in microdollars per priced unit, as an integer in text.
-    # - +settled_at+: When the line settles: its hour's end (UTC). A line can change only until the page's `finalThrough` reaches it.
-    # - +final+: Whether the line is final: its `settledAt` is at or before the page's `finalThrough`, and it never changes again.
-    # - +resource_final+: Whether its resource is deleted and every line it will ever have is final.
-    UsageLine = Struct.new(:id, :subject_id, :resource_id, :project_id, :meter, :starts_at, :ends_at, :quantity, :unit, :charged_micros, :rate_micros, :settled_at, :final, :resource_final, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "at" => self.at,
+        "product" => self.product,
+        "charged" => self.charged,
+      }.compact
+    end
+  end
 
-        new(
-          id: h["id"],
-          subject_id: h["subjectId"],
-          resource_id: h["resourceId"],
-          project_id: h["projectId"],
-          meter: h["meter"],
-          starts_at: h["startsAt"],
-          ends_at: h["endsAt"],
-          quantity: h["quantity"],
-          unit: h["unit"],
-          charged_micros: h["chargedMicros"],
-          rate_micros: h["rateMicros"],
-          settled_at: h["settledAt"],
-          final: h["final"],
-          resource_final: h["resourceFinal"],
-        )
-      end
+  # One meter's part of one product's month: a quantity at the card's rate.
+  # - +product+: What it was used by, as `hours` names it (`sandbox`, `disk`, `traffic`, ...).
+  # - +meter+: The card's meter (`cpu`, `memory`, `traffic-out`, ...).
+  # - +name+: The meter's name on the card (`CPU`, `Memory`), from `names::METERS`.
+  # - +quantity+: Used this month, in `unit`, as a decimal in text.
+  # - +unit+: What `quantity` counts: `active vCPU-hours`, `GiB-hours`, `GiB-months`, `GB`, ...
+  # - +rate+: The card's price for one of `unit`, as the card writes it (`$0.03 per active vCPU-hour`).
+  # - +charged+: What it costs on the price card, before any credit, in US dollars.
+  ProductLine = Struct.new(:product, :meter, :name, :quantity, :unit, :rate, :charged, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "id" => self.id,
-          "subjectId" => self.subject_id,
-          "resourceId" => self.resource_id,
-          "projectId" => self.project_id,
-          "meter" => self.meter,
-          "startsAt" => self.starts_at,
-          "endsAt" => self.ends_at,
-          "quantity" => self.quantity,
-          "unit" => self.unit,
-          "chargedMicros" => self.charged_micros,
-          "rateMicros" => self.rate_micros,
-          "settledAt" => self.settled_at,
-          "final" => self.final,
-          "resourceFinal" => self.resource_final,
-        }.compact
-      end
+      new(
+        product: h["product"],
+        meter: h["meter"],
+        name: h["name"],
+        quantity: h["quantity"],
+        unit: h["unit"],
+        rate: h["rate"],
+        charged: h["charged"],
+      )
     end
 
-    # The organization's measured usage in a time range, oldest hour first.
-    # - +since+: The range's first moment, inclusive (UTC).
-    # - +until+: The range's end, exclusive (UTC).
-    # - +final_through+: Every line whose `settledAt` is at or before this moment is final: all usage before it has been measured. It never moves back; a later hour stays open until its usage is measured. None: no line is final yet.
-    # - +items+: Each meter of each resource's hour.
-    # - +next+: Pass as cursor, with the same range, for the next page; none on the last.
-    # - +cursor+: The cursor this page was asked from; none on the first page.
-    UsageExport = Struct.new(:since, :until, :final_through, :items, :next, :cursor, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "product" => self.product,
+        "meter" => self.meter,
+        "name" => self.name,
+        "quantity" => self.quantity,
+        "unit" => self.unit,
+        "rate" => self.rate,
+        "charged" => self.charged,
+      }.compact
+    end
+  end
 
-        new(
-          since: h["since"],
-          until: h["until"],
-          final_through: h["finalThrough"],
-          items: h["items"]&.map { |i| UsageLine.from(i) },
-          next: h["next"],
-          cursor: h["cursor"],
-        )
-      end
+  # What one key, or what was made with no key, used this month.
+  # - +key_id+: The key the machines and storage were made with. Omitted for what was made with no key (signed in to the console), and for `others`.
+  # - +name+: The key's name.
+  # - +account_id+: The person the key acts for, or who made it signed in to the console.
+  # - +email+: That person's email address.
+  # - +agent_id+: The agent or CI pipeline the key acts as.
+  # - +source+: `key`: one key's. `console`: made signed in, with no key. `others`: keys the caller may not see, together. `unknown`: made by something deleted too long ago to name.
+  # - +charged+: Charged this month at the card's rates, in US dollars.
+  KeySpend = Struct.new(:key_id, :name, :account_id, :email, :agent_id, :source, :charged, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "since" => self.since,
-          "until" => self.until,
-          "finalThrough" => self.final_through,
-          "items" => self.items&.map { |i| i&.to_wire },
-          "next" => self.next,
-          "cursor" => self.cursor,
-        }.compact
-      end
+      new(
+        key_id: h["keyId"],
+        name: h["name"],
+        account_id: h["accountId"],
+        email: h["email"],
+        agent_id: h["agentId"],
+        source: h["source"],
+        charged: h["charged"],
+      )
     end
 
-    # What the organization has used and has left at the price card's rates, and every limit it is held to.
-    class UsageClient
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "keyId" => self.key_id,
+        "name" => self.name,
+        "accountId" => self.account_id,
+        "email" => self.email,
+        "agentId" => self.agent_id,
+        "source" => self.source,
+        "charged" => self.charged,
+      }.compact
+    end
+  end
 
-      # Returns the organization's credit and charges (everything credited and spent, what is left, and this month's use and charges by meter), its plan, and every limit it is held to with what it uses of each now; with key, that key's spend.
-      def get(key: nil)
-        Usage.from(@transport.request("GET", "/v2/usage", query: { "key" => key }, idempotent: true))
-      end
+  # What the org has used and has left, at the card's prices.
+  # - +org_id+: The organization.
+  # - +period_start+: The month's first moment (UTC).
+  # - +credited+: Every credit ever added, in US dollars.
+  # - +spent+: Every charge ever settled, in US dollars.
+  # - +available+: What can still be spent: credited less spent, in US dollars.
+  # - +period_spent+: Charged this month, in US dollars.
+  # - +meters+: This month's use and charges by meter.
+  # - +plan+: Its plan on the price card.
+  # - +limits+: Every limit it is held to, with what it uses of each now: the figures a create past one is refused by.
+  # - +spend_cap+: The org's own cap on a month's charges, in US dollars.
+  # - +key+: One key's spend, when the call names it (`key`).
+  # - +key_spend_cap+: The spend cap this key's creates are held to: the tightest of its own, those of the keys it was made with, and its holder's grants'. Omitted when none holds it.
+  # - +hours+: With `by=hour`: what each product used each hour, since the month began or 7 days ago, whichever is earlier, oldest first. Only hours that cost something.
+  # - +lines+: With `by=hour`: what each product's month is made of, a line for each meter it used, its quantity at the card's rate. A product's lines sum to its hours since the month began.
+  # - +keys+: With `by=key`: what each key's machines and storage used this month, most first. A key the caller may not see is counted under `others`.
+  Usage = Struct.new(:org_id, :period_start, :credited, :spent, :available, :period_spent, :meters, :plan, :limits, :spend_cap, :key, :key_spend_cap, :hours, :lines, :keys, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      # Returns the organization's measured usage in a time range, of every resource or only those named: each meter of each machine's, disk's or address's hour, what it used and its price at the card, oldest first, paginated. Each line settles at its hour's end and is final once finalThrough reaches it, so closed hours can be read while resources run.
-      def export(since:, until:, by: nil, resource_id: nil, cursor: nil, limit: nil)
-        UsageExport.from(@transport.request("GET", "/v2/usage/export", query: { "since" => since, "until" => binding.local_variable_get(:until), "by" => by, "resourceId" => resource_id, "cursor" => cursor, "limit" => limit }, idempotent: true))
-      end
+      new(
+        org_id: h["orgId"],
+        period_start: h["periodStart"],
+        credited: h["credited"],
+        spent: h["spent"],
+        available: h["available"],
+        period_spent: h["periodSpent"],
+        meters: h["meters"]&.map { |i| MeterUse.from(i) },
+        plan: h["plan"],
+        limits: h["limits"]&.map { |i| Limit.from(i) },
+        spend_cap: h["spendCap"],
+        key: KeyUsage.from(h["key"]),
+        key_spend_cap: KeySpendCap.from(h["keySpendCap"]),
+        hours: h["hours"]&.map { |i| UsageHour.from(i) },
+        lines: h["lines"]&.map { |i| ProductLine.from(i) },
+        keys: h["keys"]&.map { |i| KeySpend.from(i) },
+      )
+    end
+
+    def to_wire
+      {
+        "orgId" => self.org_id,
+        "periodStart" => self.period_start,
+        "credited" => self.credited,
+        "spent" => self.spent,
+        "available" => self.available,
+        "periodSpent" => self.period_spent,
+        "meters" => self.meters&.map { |i| i&.to_wire },
+        "plan" => self.plan,
+        "limits" => self.limits&.map { |i| i&.to_wire },
+        "spendCap" => self.spend_cap,
+        "key" => self.key&.to_wire,
+        "keySpendCap" => self.key_spend_cap&.to_wire,
+        "hours" => self.hours&.map { |i| i&.to_wire },
+        "lines" => self.lines&.map { |i| i&.to_wire },
+        "keys" => self.keys&.map { |i| i&.to_wire },
+      }.compact
+    end
+  end
+
+  # One meter of one machine's, disk's or address's hour, as measured, at the card's price.
+  # - +id+: The line's ID: the same line has the same ID on every read.
+  # - +subject_id+: The resource it was used by: a machine, a disk or an address.
+  # - +resource_id+: The ID its product names it by (a machine's own ID).
+  # - +project_id+: Its project.
+  # - +meter+: The card's meter (`cpu`, `memory`, `standard`, `traffic-out`, ...).
+  # - +starts_at+: The hour's first moment (UTC).
+  # - +ends_at+: The hour's end.
+  # - +quantity+: What was used, in the meter's base unit, as an integer in text.
+  # - +unit+: The base unit: `core-microseconds`, `vcpu-microseconds`, `byte-seconds`, `bytes`, `calls` or `seconds`.
+  # - +charged_micros+: The hour alone at the card's rate, rounded down, in integer microdollars as text.
+  # - +rate_micros+: The card's rate, in microdollars per priced unit, as an integer in text.
+  # - +settled_at+: When the line settles: its hour's end (UTC). A line can change only until the page's `finalThrough` reaches it.
+  # - +final+: Whether the line is final: its `settledAt` is at or before the page's `finalThrough`, and it never changes again.
+  # - +resource_final+: Whether its resource is deleted and every line it will ever have is final.
+  UsageLine = Struct.new(:id, :subject_id, :resource_id, :project_id, :meter, :starts_at, :ends_at, :quantity, :unit, :charged_micros, :rate_micros, :settled_at, :final, :resource_final, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
+
+      new(
+        id: h["id"],
+        subject_id: h["subjectId"],
+        resource_id: h["resourceId"],
+        project_id: h["projectId"],
+        meter: h["meter"],
+        starts_at: h["startsAt"],
+        ends_at: h["endsAt"],
+        quantity: h["quantity"],
+        unit: h["unit"],
+        charged_micros: h["chargedMicros"],
+        rate_micros: h["rateMicros"],
+        settled_at: h["settledAt"],
+        final: h["final"],
+        resource_final: h["resourceFinal"],
+      )
+    end
+
+    def to_wire
+      {
+        "id" => self.id,
+        "subjectId" => self.subject_id,
+        "resourceId" => self.resource_id,
+        "projectId" => self.project_id,
+        "meter" => self.meter,
+        "startsAt" => self.starts_at,
+        "endsAt" => self.ends_at,
+        "quantity" => self.quantity,
+        "unit" => self.unit,
+        "chargedMicros" => self.charged_micros,
+        "rateMicros" => self.rate_micros,
+        "settledAt" => self.settled_at,
+        "final" => self.final,
+        "resourceFinal" => self.resource_final,
+      }.compact
+    end
+  end
+
+  # The organization's measured usage in a time range, oldest hour first.
+  # - +since+: The range's first moment, inclusive (UTC).
+  # - +until+: The range's end, exclusive (UTC).
+  # - +final_through+: Every line whose `settledAt` is at or before this moment is final: all usage before it has been measured. It never moves back; a later hour stays open until its usage is measured. None: no line is final yet.
+  # - +items+: Each meter of each resource's hour.
+  # - +next+: Pass as cursor, with the same range, for the next page; none on the last.
+  # - +cursor+: The cursor this page was asked from; none on the first page.
+  UsageExport = Struct.new(:since, :until, :final_through, :items, :next, :cursor, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
+
+      new(
+        since: h["since"],
+        until: h["until"],
+        final_through: h["finalThrough"],
+        items: h["items"]&.map { |i| UsageLine.from(i) },
+        next: h["next"],
+        cursor: h["cursor"],
+      )
+    end
+
+    def to_wire
+      {
+        "since" => self.since,
+        "until" => self.until,
+        "finalThrough" => self.final_through,
+        "items" => self.items&.map { |i| i&.to_wire },
+        "next" => self.next,
+        "cursor" => self.cursor,
+      }.compact
+    end
+  end
+
+  # What the organization has used and has left at the price card's rates, and every limit it is held to.
+  class UsageClient
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Returns the organization's credit and charges (everything credited and spent, what is left, and this month's use and charges by meter), its plan, and every limit it is held to with what it uses of each now; with key, that key's spend.
+    def get(key: nil, by: nil)
+      Usage.from(@transport.request("GET", "/v2/usage", query: { "key" => key, "by" => by }, idempotent: true))
+    end
+
+    # Returns the organization's measured usage in a time range, of every resource or only those named: each meter of each machine's, disk's or address's hour, what it used and its price at the card, oldest first, paginated. Each line settles at its hour's end and is final once finalThrough reaches it, so closed hours can be read while resources run.
+    def export(since:, until:, by: nil, resource_id: nil, cursor: nil, limit: nil)
+      UsageExport.from(@transport.request("GET", "/v2/usage/export", query: { "since" => since, "until" => binding.local_variable_get(:until), "by" => by, "resourceId" => resource_id, "cursor" => cursor, "limit" => limit }, idempotent: true))
     end
   end
 end

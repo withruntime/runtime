@@ -1,10 +1,10 @@
 # Pause and resume
 
-A paused sandbox keeps its disk, its memory and its running processes, and costs only its storage, $0.18 per GB-month. Resume it and its programs carry on from where they were.
+A paused machine keeps its disk, its memory and its running processes, and costs only its storage, $0.18 per GiB-month. Resume it and its programs carry on from where they were.
 
 - [`POST /v2/sandboxes/{id}:pause`](./reference/sandboxes#pause) pauses it.
 - [`POST /v2/sandboxes/{id}:resume`](./reference/sandboxes#resume) resumes it. Any call that needs it running, such as [`POST /v2/sandboxes/{id}:exec`](./reference/sandboxes#exec), resumes it first, so you rarely call resume yourself.
-- A sandbox with nothing happening in it pauses by itself. Set how long it waits with [`idlePauseSeconds`](./reference/sandboxes#machineupdate) on [`POST /v2/sandboxes/{id}:update`](./reference/sandboxes#update): Seconds with nothing happening before it pauses, 60 to 86400; 0 never.
+- A machine with nothing happening in it pauses by itself once its product's default idle time passes; apps and builds by default never do. Set how long it waits with [`idlePauseSeconds`](./reference/sandboxes#machineupdate) on [`POST /v2/sandboxes/{id}:update`](./reference/sandboxes#update): Seconds with nothing happening before it pauses, 60 to 86400; 0 never. Nothing happening means no call or command running, no traffic, almost no CPU, and no outbound connection it opened still open.
 
 ## A process keeps running across a pause
 
@@ -29,12 +29,12 @@ try {
 
 - An agent waiting on a model or a person: pause it, and the next call resumes it.
 - A dev environment overnight: pause it rather than delete it, and keep its installed packages and open files.
-- Many short tasks from the same prepared state: keep one sandbox ready and [fork](./snapshots) it for each task.
+- Many short tasks from the same prepared state: keep one machine ready and [fork](./snapshots) it for each task.
 
 ## Give this to your agent
 
 Paste this into your coding agent:
 
-> Read https://withruntime.com/docs/pause-and-resume.md. Change this project so sandboxes that wait for a user or a model are paused instead of kept running or recreated, and are resumed by the next call.
+> Read https://withruntime.com/docs/pause-and-resume.md. Change this project so machines that wait for a user or a model are paused instead of kept running or recreated, and are resumed by the next call.
 >
 > This page as Markdown: https://withruntime.com/docs/pause-and-resume.md

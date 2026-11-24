@@ -44,13 +44,13 @@ export interface Feedback {
 
 /** A report to Runtime's team: a bug, a missing feature, a gap against another provider, a migration blocker, unclear docs, a price, or praise. Every report is read. */
 export class FeedbackClient {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Sends a report to Runtime's team. Quote the requestId of an error you hit; never send credentials, private files or user data. */
   create(input: FeedbackCreate, options?: RequestOptions): Promise<Feedback> {
-    return this.#t.request<Feedback>("POST", `/v2/feedback`, { body: input, options });
+    return this.transport.request<Feedback>("POST", `/v2/feedback`, { body: input, options });
   }
 }

@@ -39,11 +39,11 @@ class Key:
     last_used_at: Optional[str] = None
     #: The most one request made with it commits, in US dollars.
     max_cost: Optional[str] = None
-    #: The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars.
+    #: The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars.
     spend_cap: Optional[str] = None
     #: The rolling window spendCap counts over, in seconds.
     spend_cap_window_seconds: Optional[int] = None
-    #: What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its sandboxes' and those of every key made with it. Listed and updated keys only.
+    #: What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its machines' and those of every key made with it. Listed and updated keys only.
     spent: Optional[str] = None
     #: When it was revoked: a delete's answer, its state `deleted`.
     deleted_at: Optional[str] = None
@@ -129,11 +129,13 @@ class KeyCreate:
     project_id: Optional[str] = None
     #: One of the organization's agents or CI pipelines it acts as, for the caller; the caller itself when omitted.
     agent_id: Optional[str] = None
+    #: The actions it holds, each `product:action` as each call's reference page names it (`sandboxes:create`, `sandboxes:exec`), on every plan: it acts as an agent of its own granted exactly these, never more than its caller may do or spend, in every project its caller reaches (one held to one project, with projectId or by a caller that reaches one alone, starts at Growth), and its agent and role are deleted with it. Omitted, it holds every action its holder's grant allows, or, made with a key that has actions, those actions. Not with agentId.
+    actions: Optional[List[str]] = None
     #: Seconds until it stops working; never when omitted. At least 60. At most 31536000.
     expires_in_seconds: Optional[int] = None
     #: The most one request made with it may commit, in US dollars (`"5.00"`): one asking more is refused 403, and a create that names no maxCost gets this one. Made with a key that has one, at most that key's.
     max_cost: Optional[str] = None
-    #: The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running sandboxes may pass it. Made with a key that has one, at most that key's, and counted in it too.
+    #: The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running machines may pass it. Made with a key that has one, at most that key's, and counted in it too.
     spend_cap: Optional[str] = None
     #: The rolling window spendCap counts over, in seconds; a day when omitted. At least 60. At most 2592000.
     spend_cap_window_seconds: Optional[int] = None
@@ -148,6 +150,7 @@ class KeyCreate:
             name=d["name"],
             project_id=d.get("projectId"),
             agent_id=d.get("agentId"),
+            actions=d["actions"] if d.get("actions") is not None else None,
             expires_in_seconds=d.get("expiresInSeconds"),
             max_cost=d.get("maxCost"),
             spend_cap=d.get("spendCap"),
@@ -161,6 +164,7 @@ class KeyCreate:
             "name": self.name,
             "projectId": self.project_id,
             "agentId": self.agent_id,
+            "actions": self.actions,
             "expiresInSeconds": self.expires_in_seconds,
             "maxCost": self.max_cost,
             "spendCap": self.spend_cap,
@@ -196,11 +200,11 @@ class KeyCreated:
     last_used_at: Optional[str] = None
     #: The most one request made with it commits, in US dollars.
     max_cost: Optional[str] = None
-    #: The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars.
+    #: The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars.
     spend_cap: Optional[str] = None
     #: The rolling window spendCap counts over, in seconds.
     spend_cap_window_seconds: Optional[int] = None
-    #: What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its sandboxes' and those of every key made with it. Listed and updated keys only.
+    #: What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its machines' and those of every key made with it. Listed and updated keys only.
     spent: Optional[str] = None
     #: When it was revoked: a delete's answer, its state `deleted`.
     deleted_at: Optional[str] = None
@@ -261,7 +265,7 @@ class KeyUpdate:
     name: Optional[str] = None
     #: The most one request made with it may commit, in US dollars (`"5.00"`). Never more than a key it was made with, nor than the key that changes it: a key never raises its own caps.
     max_cost: Optional[str] = None
-    #: The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it.
+    #: The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it.
     spend_cap: Optional[str] = None
     #: The rolling window spendCap counts over, in seconds; kept when omitted, a day for a key that had no spendCap. At least 60. At most 2592000.
     spend_cap_window_seconds: Optional[int] = None
@@ -298,9 +302,9 @@ class Keys:
         """Lists the organization's live keys, newest first, without their secrets: every key for an owner or an admin, the caller's own otherwise."""
         return page(self._transport.request("GET", f"/v2/keys", query={"cursor": cursor, "limit": limit}, idempotent=True), Key.from_dict, lambda c: self.list(cursor=c, limit=limit))
 
-    def create(self, *, name: str, project_id: Optional[str] = None, agent_id: Optional[str] = None, expires_in_seconds: Optional[int] = None, max_cost: Optional[str] = None, spend_cap: Optional[str] = None, spend_cap_window_seconds: Optional[int] = None, user_code: Optional[str] = None, authorization: Optional["KeyAuthorization"] = None, idempotency_key: Optional[str] = None) -> KeyCreated:
+    def create(self, *, name: str, project_id: Optional[str] = None, agent_id: Optional[str] = None, actions: Optional[List[str]] = None, expires_in_seconds: Optional[int] = None, max_cost: Optional[str] = None, spend_cap: Optional[str] = None, spend_cap_window_seconds: Optional[int] = None, user_code: Optional[str] = None, authorization: Optional["KeyAuthorization"] = None, idempotency_key: Optional[str] = None) -> KeyCreated:
         """Makes a key that acts as the caller, or as one of the organization's agents for the caller, and returns its secret this once. With `userCode` or `authorization`, the key goes to the device or OAuth client that asked for it instead, which collects it once from `/v2/oauth/token`. A key made with a key works until its own end, never past that key's: it lives on when that key is revoked, so a key is rotated by making its next with it."""
-        return KeyCreated.from_dict(self._transport.request("POST", f"/v2/keys", body=compact({"name": name, "projectId": project_id, "agentId": agent_id, "expiresInSeconds": expires_in_seconds, "maxCost": max_cost, "spendCap": spend_cap, "spendCapWindowSeconds": spend_cap_window_seconds, "userCode": user_code, "authorization": authorization}), idempotency_key=idempotency_key))
+        return KeyCreated.from_dict(self._transport.request("POST", f"/v2/keys", body=compact({"name": name, "projectId": project_id, "agentId": agent_id, "actions": actions, "expiresInSeconds": expires_in_seconds, "maxCost": max_cost, "spendCap": spend_cap, "spendCapWindowSeconds": spend_cap_window_seconds, "userCode": user_code, "authorization": authorization}), idempotency_key=idempotency_key))
 
     def update(self, id: str, *, name: Optional[str] = None, max_cost: Optional[str] = None, spend_cap: Optional[str] = None, spend_cap_window_seconds: Optional[int] = None, remove: Optional[List[Literal["maxCost", "spendCap", "unknown"]]] = None, idempotency_key: Optional[str] = None) -> Key:
         """Renames a key, or sets or removes its caps (`maxCost`, `spendCap`); its secret stays as it is. A cap is never set above that of a key it was made with, nor above the caller's own key's, so a key never raises its own caps. An owner or an admin changes any key of the organization; everyone else, their own."""
@@ -321,9 +325,9 @@ class AsyncKeys:
         """Lists the organization's live keys, newest first, without their secrets: every key for an owner or an admin, the caller's own otherwise."""
         return async_page(await self._transport.request("GET", f"/v2/keys", query={"cursor": cursor, "limit": limit}, idempotent=True), Key.from_dict, lambda c: self.list(cursor=c, limit=limit))
 
-    async def create(self, *, name: str, project_id: Optional[str] = None, agent_id: Optional[str] = None, expires_in_seconds: Optional[int] = None, max_cost: Optional[str] = None, spend_cap: Optional[str] = None, spend_cap_window_seconds: Optional[int] = None, user_code: Optional[str] = None, authorization: Optional["KeyAuthorization"] = None, idempotency_key: Optional[str] = None) -> KeyCreated:
+    async def create(self, *, name: str, project_id: Optional[str] = None, agent_id: Optional[str] = None, actions: Optional[List[str]] = None, expires_in_seconds: Optional[int] = None, max_cost: Optional[str] = None, spend_cap: Optional[str] = None, spend_cap_window_seconds: Optional[int] = None, user_code: Optional[str] = None, authorization: Optional["KeyAuthorization"] = None, idempotency_key: Optional[str] = None) -> KeyCreated:
         """Makes a key that acts as the caller, or as one of the organization's agents for the caller, and returns its secret this once. With `userCode` or `authorization`, the key goes to the device or OAuth client that asked for it instead, which collects it once from `/v2/oauth/token`. A key made with a key works until its own end, never past that key's: it lives on when that key is revoked, so a key is rotated by making its next with it."""
-        return KeyCreated.from_dict(await self._transport.request("POST", f"/v2/keys", body=compact({"name": name, "projectId": project_id, "agentId": agent_id, "expiresInSeconds": expires_in_seconds, "maxCost": max_cost, "spendCap": spend_cap, "spendCapWindowSeconds": spend_cap_window_seconds, "userCode": user_code, "authorization": authorization}), idempotency_key=idempotency_key))
+        return KeyCreated.from_dict(await self._transport.request("POST", f"/v2/keys", body=compact({"name": name, "projectId": project_id, "agentId": agent_id, "actions": actions, "expiresInSeconds": expires_in_seconds, "maxCost": max_cost, "spendCap": spend_cap, "spendCapWindowSeconds": spend_cap_window_seconds, "userCode": user_code, "authorization": authorization}), idempotency_key=idempotency_key))
 
     async def update(self, id: str, *, name: Optional[str] = None, max_cost: Optional[str] = None, spend_cap: Optional[str] = None, spend_cap_window_seconds: Optional[int] = None, remove: Optional[List[Literal["maxCost", "spendCap", "unknown"]]] = None, idempotency_key: Optional[str] = None) -> Key:
         """Renames a key, or sets or removes its caps (`maxCost`, `spendCap`); its secret stays as it is. A cap is never set above that of a key it was made with, nor above the caller's own key's, so a key never raises its own caps. An owner or an admin changes any key of the organization; everyone else, their own."""

@@ -4,388 +4,525 @@
 require "uri"
 require_relative "runtime"
 require_relative "sandboxes"
+require_relative "snapshots"
 
 module Withruntime
-  module Generated
-    # Chunks of a build's context, by their SHA-256.
-    # - +digests+: At most 10,000 SHA-256 digests, each 64 lowercase hex digits.
-    ContextAsked = Struct.new(:digests, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # Chunks of a build's context, by their SHA-256.
+  # - +digests+: At most 10,000 SHA-256 digests, each 64 lowercase hex digits.
+  ContextAsked = Struct.new(:digests, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          digests: h["digests"],
-        )
-      end
-
-      def to_wire
-        {
-          "digests" => self.digests,
-        }.compact
-      end
+      new(
+        digests: h["digests"],
+      )
     end
 
-    # Which chunks of a build's context still need uploading.
-    # - +missing+: The digests asked for that the organization's build context does not hold, sorted, each once.
-    ContextMissing = Struct.new(:missing, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "digests" => self.digests,
+      }.compact
+    end
+  end
 
-        new(
-          missing: h["missing"],
-        )
-      end
+  # Which chunks of a build's context still need uploading.
+  # - +missing+: The digests asked for that the organization's build context does not hold, sorted, each once.
+  ContextMissing = Struct.new(:missing, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "missing" => self.missing,
-        }.compact
-      end
+      new(
+        missing: h["missing"],
+      )
     end
 
-    # A chunk of a build's context, uploaded.
-    # - +sha256+: Its SHA-256.
-    # - +size+: Its size in bytes.
-    # - +stored+: Stored by this call: false when the build context held it already.
-    ChunkStored = Struct.new(:sha256, :size, :stored, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "missing" => self.missing,
+      }.compact
+    end
+  end
 
-        new(
-          sha256: h["sha256"],
-          size: h["size"],
-          stored: h["stored"],
-        )
-      end
+  # A chunk of a build's context, uploaded.
+  # - +sha256+: Its SHA-256.
+  # - +size+: Its size in bytes.
+  # - +stored+: Stored by this call: false when the build context held it already.
+  ChunkStored = Struct.new(:sha256, :size, :stored, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "sha256" => self.sha256,
-          "size" => self.size,
-          "stored" => self.stored,
-        }.compact
-      end
+      new(
+        sha256: h["sha256"],
+        size: h["size"],
+        stored: h["stored"],
+      )
     end
 
-    # A file of an image build's context, sent inline.
-    # - +path+: Its path in the build context, which `COPY` and `ADD` read.
-    # - +content+: Its content: UTF-8 text, or base64 when `encoding` says so.
-    # - +encoding+: `utf8` (the default) or `base64`.
-    # - +mode+: Its permission bits, 0 to 511 (0777 in octal). At least 0. At most 511.
-    ImageFile = Struct.new(:path, :content, :encoding, :mode, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "sha256" => self.sha256,
+        "size" => self.size,
+        "stored" => self.stored,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          content: h["content"],
-          encoding: h["encoding"],
-          mode: h["mode"],
-        )
-      end
+  # A file of an image build's context, sent inline.
+  # - +path+: Its path in the build context, which `COPY` and `ADD` read.
+  # - +content+: Its content: UTF-8 text, or base64 when `encoding` says so.
+  # - +encoding+: `utf8` (the default) or `base64`.
+  # - +mode+: Its permission bits, 0 to 511 (0777 in octal). At least 0. At most 511.
+  ImageFile = Struct.new(:path, :content, :encoding, :mode, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "content" => self.content,
-          "encoding" => self.encoding,
-          "mode" => self.mode,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        content: h["content"],
+        encoding: h["encoding"],
+        mode: h["mode"],
+      )
     end
 
-    # An image described by its packages, files and commands, rendered into a Dockerfile: `FROM` its base, its `env`, one `RUN` each for its apt, pip and npm packages, its files, then its commands in `workdir`.
-    # - +base+: The image it starts from: `runtime` (the default, Runtime's own) or an OCI image, such as `python:3.12-slim`.
-    # - +apt+: Debian packages, each `name` or `name=version`. At most 500 items.
-    # - +pip+: Python packages, each as pip takes one: `pandas`, `numpy==2.1`, `uvicorn[standard]>=0.30`. At most 500 items.
-    # - +npm+: npm packages, installed globally: `typescript`, `@scope/tool@1`. At most 500 items.
-    # - +commands+: Shell commands, each run by `/bin/sh` in `workdir` after the packages and files. At most 500 items.
-    # - +env+: Environment set before the packages; `$NAME` names its base's.
-    # - +files+: Files written into the image, each `path` absolute: at most 1 MiB in all. At most 256 items.
-    # - +workdir+: Where its commands run and its machines start: `/workspace` by default.
-    ImageRecipe = Struct.new(:base, :apt, :pip, :npm, :commands, :env, :files, :workdir, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "content" => self.content,
+        "encoding" => self.encoding,
+        "mode" => self.mode,
+      }.compact
+    end
+  end
 
-        new(
-          base: h["base"],
-          apt: h["apt"],
-          pip: h["pip"],
-          npm: h["npm"],
-          commands: h["commands"],
-          env: h["env"],
-          files: h["files"]&.map { |i| ImageFile.from(i) },
-          workdir: h["workdir"],
-        )
-      end
+  # An image described by its packages, files and commands, rendered into a Dockerfile: `FROM` its base, its `env`, one `RUN` each for its apt, pip and npm packages, its files, then its commands in `workdir`.
+  # - +base+: The image it starts from: `runtime` (the default, Runtime's own) or an OCI image, such as `python:3.12-slim`.
+  # - +apt+: Debian packages, each `name` or `name=version`. At most 500 items.
+  # - +pip+: Python packages, each as pip takes one: `pandas`, `numpy==2.1`, `uvicorn[standard]>=0.30`. At most 500 items.
+  # - +npm+: npm packages, installed globally: `typescript`, `@scope/tool@1`. At most 500 items.
+  # - +commands+: Shell commands, each run by `/bin/sh` in `workdir` after the packages and files. At most 500 items.
+  # - +env+: Environment set before the packages; `$NAME` names its base's.
+  # - +files+: Files written into the image, each `path` absolute: at most 1 MiB in all. At most 256 items.
+  # - +workdir+: Where its commands run and its machines start: `/workspace` by default.
+  ImageRecipe = Struct.new(:base, :apt, :pip, :npm, :commands, :env, :files, :workdir, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "base" => self.base,
-          "apt" => self.apt,
-          "pip" => self.pip,
-          "npm" => self.npm,
-          "commands" => self.commands,
-          "env" => self.env,
-          "files" => self.files&.map { |i| i&.to_wire },
-          "workdir" => self.workdir,
-        }.compact
-      end
+      new(
+        base: h["base"],
+        apt: h["apt"],
+        pip: h["pip"],
+        npm: h["npm"],
+        commands: h["commands"],
+        env: h["env"],
+        files: h["files"]&.map { |i| ImageFile.from(i) },
+        workdir: h["workdir"],
+      )
     end
 
-    # A build context's archive: a tar (gzip allowed), cut into chunks of at most 1 MiB, each uploaded first (`images.context.put`).
-    # - +sha256+: The whole archive's SHA-256, in hex.
-    # - +size+: Its size in bytes. At least 1.
-    # - +chunks+: Its chunks' SHA-256s, in order. At most 200 items.
-    ImageArchive = Struct.new(:sha256, :size, :chunks, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "base" => self.base,
+        "apt" => self.apt,
+        "pip" => self.pip,
+        "npm" => self.npm,
+        "commands" => self.commands,
+        "env" => self.env,
+        "files" => self.files&.map { |i| i&.to_wire },
+        "workdir" => self.workdir,
+      }.compact
+    end
+  end
 
-        new(
-          sha256: h["sha256"],
-          size: h["size"],
-          chunks: h["chunks"],
-        )
-      end
+  # A build context's archive: a tar (gzip allowed), cut into chunks of at most 1 MiB, each uploaded first (`images.context.put`).
+  # - +sha256+: The whole archive's SHA-256, in hex.
+  # - +size+: Its size in bytes. At least 1.
+  # - +chunks+: Its chunks' SHA-256s, in order. At most 200 items.
+  ImageArchive = Struct.new(:sha256, :size, :chunks, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "sha256" => self.sha256,
-          "size" => self.size,
-          "chunks" => self.chunks,
-        }.compact
-      end
+      new(
+        sha256: h["sha256"],
+        size: h["size"],
+        chunks: h["chunks"],
+      )
     end
 
-    # A regular file of a build context's archive.
-    # - +path+: Its path in the context.
-    # - +sha256+: Its SHA-256, in hex.
-    # - +size+: Its size in bytes.
-    # - +mode+: Its permission bits.
-    ImageContextFile = Struct.new(:path, :sha256, :size, :mode, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "sha256" => self.sha256,
+        "size" => self.size,
+        "chunks" => self.chunks,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          sha256: h["sha256"],
-          size: h["size"],
-          mode: h["mode"],
-        )
-      end
+  # A regular file of a build context's archive.
+  # - +path+: Its path in the context.
+  # - +sha256+: Its SHA-256, in hex.
+  # - +size+: Its size in bytes.
+  # - +mode+: Its permission bits.
+  ImageContextFile = Struct.new(:path, :sha256, :size, :mode, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "sha256" => self.sha256,
-          "size" => self.size,
-          "mode" => self.mode,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        sha256: h["sha256"],
+        size: h["size"],
+        mode: h["mode"],
+      )
     end
 
-    # A build context uploaded as chunks: the SDKs and CLI make it from a folder and its `.dockerignore`.
-    # - +archive+: The archive.
-    # - +files+: Every regular file in it.
-    ImageContext = Struct.new(:archive, :files, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "sha256" => self.sha256,
+        "size" => self.size,
+        "mode" => self.mode,
+      }.compact
+    end
+  end
 
-        new(
-          archive: ImageArchive.from(h["archive"]),
-          files: h["files"]&.map { |i| ImageContextFile.from(i) },
-        )
-      end
+  # A build context uploaded as chunks: the SDKs and CLI make it from a folder and its `.dockerignore`.
+  # - +archive+: The archive.
+  # - +files+: Every regular file in it.
+  ImageContext = Struct.new(:archive, :files, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "archive" => self.archive&.to_wire,
-          "files" => self.files&.map { |i| i&.to_wire },
-        }.compact
-      end
+      new(
+        archive: ImageArchive.from(h["archive"]),
+        files: h["files"]&.map { |i| ImageContextFile.from(i) },
+      )
     end
 
-    # What an image's build runs on: a machine of its own, deleted once the build ends.
-    # - +vcpu+: Its vCPUs. At least 1. At most 8. Default: 2.
-    # - +memory_gb+: Its memory in GB. At least 1. At most 16. Default: 4.
-    # - +disk_gb+: Its disk in GB: the base image, the earlier stages and the context. At least 4. At most 32. Default: 16.
-    # - +timeout_seconds+: Seconds the build may run before it fails. At least 60. At most 3600. Default: 1800.
-    ImageBuild = Struct.new(:vcpu, :memory_gb, :disk_gb, :timeout_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "archive" => self.archive&.to_wire,
+        "files" => self.files&.map { |i| i&.to_wire },
+      }.compact
+    end
+  end
 
-        new(
-          vcpu: h["vcpu"],
-          memory_gb: h["memoryGB"],
-          disk_gb: h["diskGB"],
-          timeout_seconds: h["timeoutSeconds"],
-        )
-      end
+  # What an image's build runs on: a machine of its own, deleted once the build ends.
+  # - +vcpu+: Its vCPUs; a build machine's default when omitted. At least 1. At most 8.
+  # - +memory_gb+: Its memory in GB; a build machine's default when omitted. At least 1. At most 16.
+  # - +disk_gb+: Its disk in GB: the base image, the earlier stages and the context. A build machine's default when omitted, at least its image's size. At least 4. At most 32.
+  # - +timeout_seconds+: Seconds the build may run before it fails. At least 60. At most 3600. Default: 1800.
+  ImageBuild = Struct.new(:vcpu, :memory_gb, :disk_gb, :timeout_seconds, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "vcpu" => self.vcpu,
-          "memoryGB" => self.memory_gb,
-          "diskGB" => self.disk_gb,
-          "timeoutSeconds" => self.timeout_seconds,
-        }.compact
-      end
+      new(
+        vcpu: h["vcpu"],
+        memory_gb: h["memoryGB"],
+        disk_gb: h["diskGB"],
+        timeout_seconds: h["timeoutSeconds"],
+      )
     end
 
-    # An image to build, from exactly one of `image` and `dockerfile`.
-    # - +name+: Its name, 1 to 64 of `a-z`, `0-9`, `.`, `_` and `-`: each build of a name is its next version.
-    # - +labels+: Labels to find it by.
-    # - +tags+: Tags its name takes for it once it is ready; `latest` when it has a name and none is given. At most 16 items.
-    # - +image+: An OCI image to use as it is, from a public registry: `python:3.12-slim`, `ghcr.io/org/app:1`.
-    # - +dockerfile+: A Dockerfile: multi-stage builds, `ARG`, `COPY --from`, heredocs. `COPY` reads `files`.
-    # - +recipe+: Packages, files and commands, rendered into a Dockerfile. Not with `files` or `context`.
-    # - +files+: The Dockerfile's build context, inline: at most 1 MiB in all. Not with `context`. At most 256 items.
-    # - +context+: The Dockerfile's build context, uploaded first as chunks: up to 200 MiB. Not with `files`.
-    # - +dockerignore+: The context's `.dockerignore`: what it names is never copied.
-    # - +target+: The stage to build instead of the last.
-    # - +build_args+: The Dockerfile's `ARG` values.
-    # - +env+: Environment every machine from it starts with, over the Dockerfile's `ENV`.
-    # - +start+: What every machine from it starts at each fresh boot, in place of the Dockerfile's `ENTRYPOINT` and `CMD`.
-    # - +build+: What its build runs on.
-    ImageCreate = Struct.new(:name, :labels, :tags, :image, :dockerfile, :recipe, :files, :context, :dockerignore, :target, :build_args, :env, :start, :build, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "vcpu" => self.vcpu,
+        "memoryGB" => self.memory_gb,
+        "diskGB" => self.disk_gb,
+        "timeoutSeconds" => self.timeout_seconds,
+      }.compact
+    end
+  end
 
-        new(
-          name: h["name"],
-          labels: h["labels"],
-          tags: h["tags"],
-          image: h["image"],
-          dockerfile: h["dockerfile"],
-          recipe: ImageRecipe.from(h["recipe"]),
-          files: h["files"]&.map { |i| ImageFile.from(i) },
-          context: ImageContext.from(h["context"]),
-          dockerignore: h["dockerignore"],
-          target: h["target"],
-          build_args: h["buildArgs"],
-          env: h["env"],
-          start: MachineStart.from(h["start"]),
-          build: ImageBuild.from(h["build"]),
-        )
-      end
+  # An image to build, from exactly one of `image` and `dockerfile`.
+  # - +name+: Its name, 1 to 64 of `a-z`, `0-9`, `.`, `_` and `-`: each build of a name is its next version.
+  # - +labels+: Labels to find it by.
+  # - +tags+: Tags its name takes for it once it is ready; `latest` when it has a name and none is given. At most 16 items.
+  # - +image+: An OCI image to use as it is: `python:3.12-slim`, `ghcr.io/org/app:1`. A private one is named by its digest, `repo@sha256:<64 hex digits>`, with `pullSecret`.
+  # - +pull_secret+: The secret holding the registry login that pulls a private `image`: a hidden secret with header `Authorization`, format `Basic {value}`, its value the base64 of `username:token`, as its hosts the registry's token service (`auth.docker.io` for Docker Hub, the registry's own name for `ghcr.io`, `quay.io` and others), and as its scope `{"none": true}`, so no machine's requests carry it. Runtime's egress proxy signs in with it for this import's build machine alone, which never holds the login or a token. The caller needs the `secrets:use` permission.
+  # - +dockerfile+: A Dockerfile: multi-stage builds, `ARG`, `COPY --from`, heredocs. `COPY` reads `files`.
+  # - +recipe+: Packages, files and commands, rendered into a Dockerfile. Not with `files` or `context`.
+  # - +files+: The Dockerfile's build context, inline: at most 1 MiB in all. Not with `context`. At most 256 items.
+  # - +context+: The Dockerfile's build context, uploaded first as chunks: up to 200 MiB. Not with `files`.
+  # - +dockerignore+: The context's `.dockerignore`: what it names is never copied.
+  # - +target+: The stage to build instead of the last.
+  # - +build_args+: The Dockerfile's `ARG` values.
+  # - +env+: Environment every machine from it starts with, over the Dockerfile's `ENV`.
+  # - +start+: What every machine from it starts at each fresh boot, in place of the Dockerfile's `ENTRYPOINT` and `CMD`.
+  # - +build+: What its build runs on.
+  # - +delete_after_seconds+: Seconds until Runtime deletes this version, as its delete does: final, and it can't be undone; one an App boots is deleted once none does. 0 or omitted: kept until deleted. At least 0. At most 315360000.
+  # - +delete_protection+: Whether this version's delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`.
+  ImageCreate = Struct.new(:name, :labels, :tags, :image, :pull_secret, :dockerfile, :recipe, :files, :context, :dockerignore, :target, :build_args, :env, :start, :build, :delete_after_seconds, :delete_protection, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "name" => self.name,
-          "labels" => self.labels,
-          "tags" => self.tags,
-          "image" => self.image,
-          "dockerfile" => self.dockerfile,
-          "recipe" => self.recipe&.to_wire,
-          "files" => self.files&.map { |i| i&.to_wire },
-          "context" => self.context&.to_wire,
-          "dockerignore" => self.dockerignore,
-          "target" => self.target,
-          "buildArgs" => self.build_args,
-          "env" => self.env,
-          "start" => self.start&.to_wire,
-          "build" => self.build&.to_wire,
-        }.compact
-      end
+      new(
+        name: h["name"],
+        labels: h["labels"],
+        tags: h["tags"],
+        image: h["image"],
+        pull_secret: h["pullSecret"],
+        dockerfile: h["dockerfile"],
+        recipe: ImageRecipe.from(h["recipe"]),
+        files: h["files"]&.map { |i| ImageFile.from(i) },
+        context: ImageContext.from(h["context"]),
+        dockerignore: h["dockerignore"],
+        target: h["target"],
+        build_args: h["buildArgs"],
+        env: h["env"],
+        start: MachineStart.from(h["start"]),
+        build: ImageBuild.from(h["build"]),
+        delete_after_seconds: h["deleteAfterSeconds"],
+        delete_protection: h["deleteProtection"],
+      )
     end
 
-    # One line of an image's build log.
-    # - +seq+: Its number, from 1.
-    # - +at+: When it was written.
-    # - +stream+: `build` (the build's output) or `system` (Runtime's).
-    # - +text+: The line, without its newline.
-    ImageLogLine = Struct.new(:seq, :at, :stream, :text, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "name" => self.name,
+        "labels" => self.labels,
+        "tags" => self.tags,
+        "image" => self.image,
+        "pullSecret" => self.pull_secret,
+        "dockerfile" => self.dockerfile,
+        "recipe" => self.recipe&.to_wire,
+        "files" => self.files&.map { |i| i&.to_wire },
+        "context" => self.context&.to_wire,
+        "dockerignore" => self.dockerignore,
+        "target" => self.target,
+        "buildArgs" => self.build_args,
+        "env" => self.env,
+        "start" => self.start&.to_wire,
+        "build" => self.build&.to_wire,
+        "deleteAfterSeconds" => self.delete_after_seconds,
+        "deleteProtection" => self.delete_protection,
+      }.compact
+    end
+  end
 
-        new(
-          seq: h["seq"],
-          at: h["at"],
-          stream: h["stream"],
-          text: h["text"],
-        )
-      end
+  # One line of an image's build log.
+  # - +seq+: Its number, from 1.
+  # - +at+: When it was written.
+  # - +stream+: `build` (the build's output) or `system` (Runtime's).
+  # - +text+: The line, without its newline.
+  ImageLogLine = Struct.new(:seq, :at, :stream, :text, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "seq" => self.seq,
-          "at" => self.at,
-          "stream" => self.stream,
-          "text" => self.text,
-        }.compact
-      end
+      new(
+        seq: h["seq"],
+        at: h["at"],
+        stream: h["stream"],
+        text: h["text"],
+      )
     end
 
-    # An image's build log after a line.
-    # - +lines+: The lines after `after`, in order.
-    # - +next_after+: The last line's number: send it as `after` to read on.
-    # - +state+: The image's state.
-    # - +truncated+: Whether lines before these were dropped.
-    # - +done+: Whether the build has ended: no line comes after these.
-    ImageLogs = Struct.new(:lines, :next_after, :state, :truncated, :done, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "seq" => self.seq,
+        "at" => self.at,
+        "stream" => self.stream,
+        "text" => self.text,
+      }.compact
+    end
+  end
 
-        new(
-          lines: h["lines"]&.map { |i| ImageLogLine.from(i) },
-          next_after: h["nextAfter"],
-          state: h["state"],
-          truncated: h["truncated"],
-          done: h["done"],
-        )
-      end
+  # An image's build log after a line.
+  # - +lines+: The lines after `after`, in order.
+  # - +next_after+: The last line's number: send it as `after` to read on.
+  # - +state+: The image's state.
+  # - +truncated+: Whether lines before these were dropped.
+  # - +done+: Whether the build has ended: no line comes after these.
+  ImageLogs = Struct.new(:lines, :next_after, :state, :truncated, :done, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "lines" => self.lines&.map { |i| i&.to_wire },
-          "nextAfter" => self.next_after,
-          "state" => self.state,
-          "truncated" => self.truncated,
-          "done" => self.done,
-        }.compact
-      end
+      new(
+        lines: h["lines"]&.map { |i| ImageLogLine.from(i) },
+        next_after: h["nextAfter"],
+        state: h["state"],
+        truncated: h["truncated"],
+        done: h["done"],
+      )
     end
 
-    # What a machine boots: a root filesystem, its environment and its start.
-    class Images
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "lines" => self.lines&.map { |i| i&.to_wire },
+        "nextAfter" => self.next_after,
+        "state" => self.state,
+        "truncated" => self.truncated,
+        "done" => self.done,
+      }.compact
+    end
+  end
 
-      # Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`).
-      def get(id)
-        Stored.from(@transport.request("GET", "/v2/images/#{URI.encode_www_form_component(id)}", idempotent: true))
-      end
+  # One of images: What a machine boots: a root filesystem, its environment and its start.
+  class Image
+    # What it was when last read, and what is under it.
+    attr_reader :info
 
-      # Lists the project's images, newest first.
-      def list(name: nil, state: nil, label: nil, cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/images", query: { "name" => name, "state" => state, "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Stored.from(i) }
-      end
+    def initialize(client, info)
+      @c = client
+      @info = info
+    end
 
-      # Returns which chunks of a build context still need uploading. The chunks it holds count as used, so they are kept for the build that names them: a chunk is kept 24 hours after its last use, and an organization's build context holds at most 200 MiB.
-      def missing(digests:, idempotency_key: nil)
-        ContextMissing.from(@transport.request("POST", "/v2/images/context:missing", body: { "digests" => digests }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Its id.
+    def id
+      @info.id
+    end
 
-      # Uploads one chunk of a build context: the request's bytes, 1 byte to 1 MiB, named by their SHA-256. Asked again, it stores nothing more.
-      def put(digest, data, idempotency_key: nil)
-        ChunkStored.from(@transport.request("PUT", "/v2/images/context/#{URI.encode_www_form_component(digest)}", data: data, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Its kind: `snapshot`, `image` or `volume`.
+    def object
+      @info.object
+    end
 
-      # Deletes an image version. Sandboxes already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App.
-      def delete(id, idempotency_key: nil)
-        Stored.from(@transport.request("DELETE", "/v2/images/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
-      end
+    # Its name, unique in its project among its kind.
+    def name
+      @info.name
+    end
 
-      # Builds an image from an OCI image or a Dockerfile on a machine of its own, and returns it at once, `making`: `ready` once built, else `failed` with `error`. Each build of a name is its next version. Asked again with the same Idempotency-Key, it returns the same one.
-      def create(name: nil, labels: nil, tags: nil, image: nil, dockerfile: nil, recipe: nil, files: nil, context: nil, dockerignore: nil, target: nil, build_args: nil, env: nil, start: nil, build: nil, idempotency_key: nil)
-        Stored.from(@transport.request("POST", "/v2/images", body: { "name" => name, "labels" => labels, "tags" => tags, "image" => image, "dockerfile" => dockerfile, "recipe" => recipe, "files" => files, "context" => context, "dockerignore" => dockerignore, "target" => target, "buildArgs" => build_args, "env" => env, "start" => start, "build" => build }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Where it is.
+    def state
+      @info.state
+    end
 
-      # Returns an image's build log after a line, as the build writes it and once it has ended.
-      def logs(id, after: nil, limit: nil, follow: nil)
-        ImageLogs.from(@transport.request("GET", "/v2/images/#{URI.encode_www_form_component(id)}/logs", query: { "after" => after, "limit" => limit, "follow" => follow }, idempotent: true))
-      end
+    # Its labels.
+    def labels
+      @info.labels
+    end
+
+    # What it was made to hold, in bytes.
+    def size_bytes
+      @info.size_bytes
+    end
+
+    # What it holds now, in bytes.
+    def stored_bytes
+      @info.stored_bytes
+    end
+
+    # What it was made from (a snapshot's machine, an image's base), if anything.
+    def parent_id
+      @info.parent_id
+    end
+
+    # The machine it is attached to now, if any.
+    def attached_to
+      @info.attached_to
+    end
+
+    # When it was made.
+    def created_at
+      @info.created_at
+    end
+
+    # An image's version of its name: each build or keep of a name is its next.
+    def version
+      @info.version
+    end
+
+    # An image's tags, each `name:tag`.
+    def tags
+      @info.tags
+    end
+
+    # Why an image's build failed.
+    def error
+      @info.error
+    end
+
+    # When it was deleted: a delete's answer, its state `deleted`.
+    def deleted_at
+      @info.deleted_at
+    end
+
+    # When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted.
+    def delete_at
+      @info.delete_at
+    end
+
+    # Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does.
+    def delete_waits_for
+      @info.delete_waits_for
+    end
+
+    # Whether its delete is refused (409 `delete_protected`) until an update turns this off.
+    def delete_protection
+      @info.delete_protection
+    end
+
+    def inspect
+      "#<Image #{@info.inspect}>"
+    end
+
+    # Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`).
+    def refresh(wait: nil, if_state: nil)
+      @info = @c.get(@info.id, wait: wait, if_state: if_state).info
+      self
+    end
+
+    # Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App.
+    def delete(idempotency_key: nil)
+      @c.delete(@info.id, idempotency_key: idempotency_key)
+    end
+
+    # Returns an image's build log after a line, as the build writes it and once it has ended.
+    def logs(after: nil, limit: nil, follow: nil)
+      @c.logs(@info.id, after: after, limit: limit, follow: follow)
+    end
+
+    # Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+    def update(delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      @info = @c.update(@info.id, delete_after_seconds: delete_after_seconds, delete_protection: delete_protection, idempotency_key: idempotency_key)
+      self
+    end
+  end
+
+  # What a machine boots: a root filesystem, its environment and its start.
+  class Images
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`).
+    def get(id, wait: nil, if_state: nil)
+      Image.new(self, Stored.from(@transport.request("GET", "/v2/images/#{URI.encode_www_form_component(id)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true)))
+    end
+
+    # Lists the project's images, newest first.
+    def list(name: nil, state: nil, label: nil, cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/images", query: { "name" => name, "state" => state, "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Stored.from(i) }
+    end
+
+    # Returns which chunks of a build context still need uploading. The chunks it holds count as used, so they are kept for the build that names them: a chunk is kept 24 hours after its last use, and an organization's build context holds at most 200 MiB.
+    def missing(digests:, idempotency_key: nil)
+      ContextMissing.from(@transport.request("POST", "/v2/images/context:missing", body: { "digests" => digests }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Uploads one chunk of a build context: the request's bytes, 1 byte to 1 MiB, named by their SHA-256. Asked again, it stores nothing more.
+    def put(digest, data, idempotency_key: nil)
+      ChunkStored.from(@transport.request("PUT", "/v2/images/context/#{URI.encode_www_form_component(digest)}", data: data, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App.
+    def delete(id, idempotency_key: nil)
+      Stored.from(@transport.request("DELETE", "/v2/images/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
+    end
+
+    # Builds an image from an OCI image or a Dockerfile on a machine of its own, and returns it at once, `making`: `ready` once built, else `failed` with `error`. Each build of a name is its next version. Asked again with the same Idempotency-Key, it returns the same one.
+    def create(name: nil, labels: nil, tags: nil, image: nil, pull_secret: nil, dockerfile: nil, recipe: nil, files: nil, context: nil, dockerignore: nil, target: nil, build_args: nil, env: nil, start: nil, build: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Image.new(self, Stored.from(@transport.request("POST", "/v2/images", body: { "name" => name, "labels" => labels, "tags" => tags, "image" => image, "pullSecret" => pull_secret, "dockerfile" => dockerfile, "recipe" => recipe, "files" => files, "context" => context, "dockerignore" => dockerignore, "target" => target, "buildArgs" => build_args, "env" => env, "start" => start, "build" => build, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true)))
+    end
+
+    # Returns an image's build log after a line, as the build writes it and once it has ended.
+    def logs(id, after: nil, limit: nil, follow: nil)
+      ImageLogs.from(@transport.request("GET", "/v2/images/#{URI.encode_www_form_component(id)}/logs", query: { "after" => after, "limit" => limit, "follow" => follow }, idempotent: true))
+    end
+
+    # Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+    def update(id, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Stored.from(@transport.request("POST", "/v2/images/#{URI.encode_www_form_component(id)}:update", body: { "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

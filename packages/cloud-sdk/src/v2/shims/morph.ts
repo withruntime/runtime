@@ -89,7 +89,7 @@ export class MorphCloudClient {
     };
     this.instances = {
       async start(p) {
-        return new Instance(k, (await k.sandboxes.create({ snapshot: p.snapshotId })).id);
+        return new Instance(k, (await k.sandboxes.create({ from: p.snapshotId })).id);
       },
       async get(p) {
         return new Instance(k, (await k.sandboxes.get(p.instanceId)).id);

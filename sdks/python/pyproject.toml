@@ -4,14 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "withruntime"
-version = "1.0.0"
+version = "1.1.0"
 description = "Runtime Cloud: Linux sandboxes for agents. The typed client for every verb of the API."
+readme = "README.md"
+keywords = ["sandbox", "cloud", "agents", "microvm", "firecracker", "code-execution", "mcp", "browser", "desktop", "jupyter"]
 license = { text = "Apache-2.0" }
 requires-python = ">=3.9"
 dependencies = ["httpx>=0.27,<1"]
 
 [project.optional-dependencies]
 keypair = ["cryptography>=42"]
+
+[project.urls]
+Homepage = "https://withruntime.com"
+Documentation = "https://withruntime.com/docs"
+Source = "https://github.com/withruntime/runtime/tree/main/sdks/python"
+Changelog = "https://github.com/withruntime/runtime/blob/main/sdks/python/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["."]

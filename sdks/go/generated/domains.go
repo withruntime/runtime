@@ -10,19 +10,19 @@ import (
 	"strconv"
 )
 
-// DomainCreate A custom domain to add, or to point at another sandbox or port.
+// DomainCreate A custom domain to add, or to point at another machine or port.
 type DomainCreate struct {
 	// Hostname The hostname, at most 253 characters.
 	Hostname string `json:"hostname"`
-	// SandboxID The sandbox to serve.
+	// SandboxID The machine to serve.
 	SandboxID string `json:"sandboxId"`
-	// Port The port inside the sandbox, 1 to 65535.
+	// Port The port inside the machine, 1 to 65535.
 	Port int64 `json:"port"`
 }
 
 // DomainSettings A custom domain's settings, as it keeps them: the port it serves, and its proof of ownership as facts.
 type DomainSettings struct {
-	// Port The port inside the sandbox. At least 1. At most 65535.
+	// Port The port inside the machine. At least 1. At most 65535.
 	Port int64 `json:"port"`
 	// Token The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`.
 	Token string `json:"token"`
@@ -34,7 +34,7 @@ type DomainSettings struct {
 	CheckError *string `json:"checkError,omitempty"`
 }
 
-// DomainInfo A custom domain: your own hostname serving a sandbox's port.
+// DomainInfo A custom domain: your own hostname serving a machine's port.
 type DomainInfo struct {
 	DomainSettings
 	// ID Its ID.
@@ -43,7 +43,7 @@ type DomainInfo struct {
 	Object string `json:"object"`
 	// Hostname The hostname, lower case.
 	Hostname string `json:"hostname"`
-	// SandboxID The sandbox it serves.
+	// SandboxID The machine it serves.
 	SandboxID string `json:"sandboxId"`
 	// State Its state: `ready` once every serving host routes it.
 	State string `json:"state"`
@@ -76,12 +76,31 @@ func (q DomainListQuery) values() url.Values {
 	return v
 }
 
-// Domains Your own hostname serving a sandbox's port, with HTTPS.
+// DomainGetQuery is what Get takes in its query.
+type DomainGetQuery struct {
+	// Wait Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60.
+	Wait *float64
+	// IfState The state the caller last read, which `wait` waits for it to leave.
+	IfState *string
+}
+
+func (q DomainGetQuery) values() url.Values {
+	v := url.Values{}
+	if q.Wait != nil {
+		v.Set("wait", strconv.FormatFloat(*q.Wait, 'f', -1, 64))
+	}
+	if q.IfState != nil {
+		v.Set("ifState", *q.IfState)
+	}
+	return v
+}
+
+// Domains Your own hostname serving a machine's port, with HTTPS.
 type Domains struct {
 	t *Transport
 }
 
-// Create Adds a hostname to serve a sandbox's port, checks its TXT record, and returns the DNS records to set. Asked again with another sandbox or port, it points the name there.
+// Create Adds a hostname to serve a machine's port, checks its TXT record, and returns the DNS records to set. Asked again with another machine or port, it points the name there.
 func (c *Domains) Create(ctx context.Context, in DomainCreate, opts *RequestOptions) (*Domain, error) {
 	out := new(DomainInfo)
 	if err := c.t.Do(ctx, "POST", "/v2/domains", nil, in, Call{Idempotent: true}, opts, out); err != nil {
@@ -99,18 +118,18 @@ func (c *Domains) List(ctx context.Context, q DomainListQuery, opts *RequestOpti
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Domains) ListAll(ctx context.Context, q DomainListQuery, opts *RequestOptions) iter.Seq2[DomainInfo, error] {
-	return all(func(cursor *string) (*Page[DomainInfo], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[DomainInfo], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
 }
 
 // Get Returns a custom domain and the DNS records it needs.
-func (c *Domains) Get(ctx context.Context, hostname string, opts *RequestOptions) (*Domain, error) {
+func (c *Domains) Get(ctx context.Context, hostname string, q DomainGetQuery, opts *RequestOptions) (*Domain, error) {
 	out := new(DomainInfo)
-	if err := c.t.Do(ctx, "GET", "/v2/domains/"+url.PathEscape(hostname), nil, nil, Call{Idempotent: true}, opts, out); err != nil {
+	if err := c.t.Do(ctx, "GET", "/v2/domains/"+url.PathEscape(hostname), q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
 	return newDomain(c, out), nil
@@ -134,7 +153,7 @@ func (c *Domains) Delete(ctx context.Context, hostname string, opts *RequestOpti
 	return out, nil
 }
 
-// Domain is one of domains: Your own hostname serving a sandbox's port, with HTTPS.
+// Domain is one of domains: Your own hostname serving a machine's port, with HTTPS.
 type Domain struct {
 	c *Domains
 	// Info is what it was when last read.
@@ -148,9 +167,16 @@ func newDomain(c *Domains, info *DomainInfo) *Domain {
 // Hostname is its hostname.
 func (s *Domain) Hostname() string { return s.Info.Hostname }
 
+// ID is its id.
+func (s *Domain) ID() string { return s.Info.ID }
+
 // Refresh Returns a custom domain and the DNS records it needs.
-func (s *Domain) Refresh(ctx context.Context, opts *RequestOptions) error {
-	got, err := s.c.Get(ctx, s.Info.Hostname, opts)
+func (s *Domain) Refresh(ctx context.Context, q *DomainGetQuery, opts *RequestOptions) error {
+	var qb DomainGetQuery
+	if q != nil {
+		qb = *q
+	}
+	got, err := s.c.Get(ctx, s.Info.Hostname, qb, opts)
 	if err != nil {
 		return err
 	}

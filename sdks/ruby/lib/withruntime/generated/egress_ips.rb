@@ -5,77 +5,77 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # A static egress IP's settings, as it keeps them.
-    # - +family+: 4 or 6.
-    # - +rate+: Its monthly price when it was reserved, in US dollars (`"5.00"`); it does not change.
-    EgressIpSettings = Struct.new(:family, :rate, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A static egress IP's settings, as it keeps them.
+  # - +family+: 4 or 6.
+  # - +rate+: Its monthly price when it was reserved, in US dollars (`"5.00"`); it does not change.
+  EgressIpSettings = Struct.new(:family, :rate, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          family: h["family"],
-          rate: h["rate"],
-        )
-      end
-
-      def to_wire
-        {
-          "family" => self.family,
-          "rate" => self.rate,
-        }.compact
-      end
+      new(
+        family: h["family"],
+        rate: h["rate"],
+      )
     end
 
-    # A static egress IP: every sandbox of the org sends from it.
-    # - +family+: 4 or 6.
-    # - +rate+: Its monthly price when it was reserved, in US dollars (`"5.00"`); it does not change.
-    # - +id+: Its ID.
-    # - +object+: Always `ip`.
-    # - +address+: The address.
-    # - +state+: Its state: `ready` once sandboxes send from it.
-    # - +disabled+: Turned off: its sandboxes send from the shared addresses.
-    # - +created_at+: When it was reserved.
-    EgressIp = Struct.new(:family, :rate, :id, :object, :address, :state, :disabled, :created_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "family" => self.family,
+        "rate" => self.rate,
+      }.compact
+    end
+  end
 
-        new(
-          family: h["family"],
-          rate: h["rate"],
-          id: h["id"],
-          object: h["object"],
-          address: h["address"],
-          state: h["state"],
-          disabled: h["disabled"],
-          created_at: h["createdAt"],
-        )
-      end
+  # A static egress IP: every machine of the org sends from it.
+  # - +family+: 4 or 6.
+  # - +rate+: Its monthly price when it was reserved, in US dollars (`"5.00"`); it does not change.
+  # - +id+: Its ID.
+  # - +object+: Always `ip`.
+  # - +address+: The address.
+  # - +state+: Its state: `ready` once machines send from it.
+  # - +disabled+: Turned off: its machines send from the shared addresses.
+  # - +created_at+: When it was reserved.
+  EgressIp = Struct.new(:family, :rate, :id, :object, :address, :state, :disabled, :created_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "family" => self.family,
-          "rate" => self.rate,
-          "id" => self.id,
-          "object" => self.object,
-          "address" => self.address,
-          "state" => self.state,
-          "disabled" => self.disabled,
-          "createdAt" => self.created_at,
-        }.compact
-      end
+      new(
+        family: h["family"],
+        rate: h["rate"],
+        id: h["id"],
+        object: h["object"],
+        address: h["address"],
+        state: h["state"],
+        disabled: h["disabled"],
+        created_at: h["createdAt"],
+      )
     end
 
-    # A static egress IP: a public address every sandbox of the org sends from, the same every time, for others' allow-lists.
-    class EgressIps
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "family" => self.family,
+        "rate" => self.rate,
+        "id" => self.id,
+        "object" => self.object,
+        "address" => self.address,
+        "state" => self.state,
+        "disabled" => self.disabled,
+        "createdAt" => self.created_at,
+      }.compact
+    end
+  end
 
-      # Lists the org's static egress IPs.
-      def list(cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/egress-ips", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| EgressIp.from(i) }
-      end
+  # A static egress IP: a public address every machine of the org sends from, the same every time, for others' allow-lists.
+  class EgressIps
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Lists the org's static egress IPs.
+    def list(cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/egress-ips", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| EgressIp.from(i) }
     end
   end
 end

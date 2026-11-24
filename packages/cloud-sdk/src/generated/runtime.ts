@@ -10,7 +10,7 @@ export interface ClientOptions {
   /** Defaults to the RUNTIME_API_KEY environment variable: a bearer key, or a
    * key pair's rtsk_ secret, which signs each request and is never sent. */
   apiKey?: string;
-  /** The project a key pair's signed requests act in. Defaults to the
+  /** The project every call acts in (Runtime-Project), and a key pair signs for. Defaults to the
    * RUNTIME_PROJECT environment variable. */
   project?: string;
   /** Defaults to RUNTIME_API_URL, then https://api.withruntime.com. */
@@ -18,8 +18,12 @@ export interface ClientOptions {
   /** Retries of a retryable error, or of a lost connection on a call that is
    * safe to send again. Default 3. */
   maxRetries?: number;
-  fetch?: typeof fetch;
+  fetch?: Fetch;
 }
+
+/** What the client sends a request with: `fetch`, or any function of its
+ * shape (Bun's `typeof fetch` adds `preconnect`, which no call needs). */
+export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export interface RequestOptions {
   /** Makes a retry safe; one is made for every write when omitted. */
@@ -172,6 +176,9 @@ export class UnauthorizedError extends RuntimeApiError {}
 /** `payment_required` (402): Add a card in the console; the work paused for payment resumes. Nothing was deleted. */
 export class PaymentRequiredError extends RuntimeApiError {}
 
+/** `card_required` (402): Add a card at https://withruntime.com/account/start to start the trial, then send the request again. */
+export class CardRequiredError extends RuntimeApiError {}
+
 /** `forbidden` (403): Use a key whose grants include this action, or ask an owner of the organization. */
 export class ForbiddenError extends RuntimeApiError {}
 
@@ -180,6 +187,9 @@ export class LimitExceededError extends RuntimeApiError {}
 
 /** `not_found` (404): Check the ID or path; list the resources to find it. */
 export class NotFoundError extends RuntimeApiError {}
+
+/** `method_not_allowed` (405): Send it with a method the Allow header names. */
+export class MethodNotAllowedError extends RuntimeApiError {}
 
 /** `already_exists` (409): Use another name, or get the one that exists. */
 export class AlreadyExistsError extends RuntimeApiError {}
@@ -213,9 +223,11 @@ const FAMILY: Record<string, new (status: number, body: ErrorBody, retryAfterMs:
   invalid_request: InvalidRequestError,
   unauthorized: UnauthorizedError,
   payment_required: PaymentRequiredError,
+  card_required: CardRequiredError,
   forbidden: ForbiddenError,
   limit_exceeded: LimitExceededError,
   not_found: NotFoundError,
+  method_not_allowed: MethodNotAllowedError,
   already_exists: AlreadyExistsError,
   conflict: ConflictError,
   too_large: TooLargeError,
@@ -251,20 +263,19 @@ const env = (name: string): string | undefined =>
   (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name];
 
 /** Waits `ms`, or until `signal` aborts: its reason then. */
-const sleep = (ms: number, signal?: AbortSignal) =>
-  new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) return reject(signal.reason);
+const sleep = async (ms: number, signal?: AbortSignal): Promise<void> => {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolve) => {
     const done = () => {
-      signal?.removeEventListener("abort", stop);
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
       resolve();
     };
     const timer = setTimeout(done, ms);
-    const stop = () => {
-      clearTimeout(timer);
-      reject(signal?.reason);
-    };
-    signal?.addEventListener("abort", stop, { once: true });
+    signal?.addEventListener("abort", done, { once: true });
   });
+  signal?.throwIfAborted();
+};
 
 /** The longest wait a retry sleeps on: a refusal that names a longer one is
  * thrown at once, with its retryAfterMs, for the caller to schedule. */
@@ -291,7 +302,7 @@ export class Transport {
   readonly #apiKey: string | undefined;
   readonly #project: string | undefined;
   readonly #maxRetries: number;
-  readonly #fetch: typeof fetch;
+  readonly #fetch: Fetch;
 
   constructor(options: ClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? env("RUNTIME_API_URL") ?? "https://api.withruntime.com").replace(/\/$/, "");
@@ -305,7 +316,8 @@ export class Transport {
     method: string,
     path: string,
     init: {
-      query?: Query;
+      /** The query's fields, and any request options it carries. */
+      query?: { readonly [k: string]: Query[string] | AbortSignal };
       body?: unknown;
       data?: Uint8Array;
       raw?: boolean;
@@ -320,12 +332,18 @@ export class Transport {
       runsSeconds?: number;
     } = {},
   ): Promise<T> {
+    // A query also takes the request options, so a verb that gains its first query field keeps the call it had
+    // (1.0.0's `domains.get(hostname, { signal })`): they are taken out of it, never sent as its fields.
+    if (init.query && ("signal" in init.query || "idempotencyKey" in init.query)) {
+      const { signal: s, idempotencyKey: k, ...query } = init.query as RequestOptions & Query;
+      init = { ...init, query, options: { signal: s, idempotencyKey: k, ...init.options } };
+    }
     const signal = init.options?.signal;
     // Undefined: no limit, the call waits for the run to end.
     const timeoutMs = !init.runs ? CALL_TIMEOUT_MS : !init.runsSeconds ? undefined : init.runsSeconds * 1000 + WAIT_MARGIN_MS;
     const url = new URL(this.baseUrl + path);
     // A list's parameter, once for each item.
-    for (const [k, v] of Object.entries(init.query ?? {}))
+    for (const [k, v] of Object.entries((init.query ?? {}) as Query))
       if (Array.isArray(v)) for (const x of v) url.searchParams.append(k, String(x));
       else if (v !== undefined) url.searchParams.set(k, String(v));
     const headers: Record<string, string> = {
@@ -363,7 +381,7 @@ export class Transport {
         res = await this.#fetch(url, {
           method,
           headers: { ...headers, ...auth },
-          body: body as BodyInit | undefined,
+          body: body as RequestInit["body"],
           signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
         });
       } catch (e) {
@@ -483,8 +501,8 @@ export function callRoute(t: Transport, r: Route, args: Record<string, unknown>,
   for (const p of r.params) {
     const v = rest[p];
     delete rest[p];
-    if (v === undefined || v === null) throw new TypeError(`${p} is required.`);
-    path = path.replace(`{${p}}`, encodeURIComponent(String(v)));
+    if (typeof v !== "string" && typeof v !== "number") throw new TypeError(v == null ? `${p} is required.` : `${p} must be a string.`);
+    path = path.replace(`{${p}}`, encodeURIComponent(v));
   }
   const query: Query = {};
   for (const q of r.query) {

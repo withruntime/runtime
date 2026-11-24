@@ -55,8 +55,8 @@ result = runtime.identities.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.identities.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.identities.list
 ```
 
 ```bash title="CLI"
@@ -103,8 +103,8 @@ result = runtime.identities.update("IDENTITY_ID", name="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.identities.update("IDENTITY_ID", name: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.identities.update("IDENTITY_ID", name: "example")
 ```
 
 ```bash title="CLI"
@@ -147,8 +147,8 @@ result = runtime.identities.delete("IDENTITY_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.identities.delete("IDENTITY_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.identities.delete("IDENTITY_ID")
 ```
 
 ```bash title="CLI"

@@ -8,12 +8,46 @@ import java.util.List;
 import java.util.Map;
 import com.withruntime.generated.Sandboxes.Stored;
 
-/** A sandbox's memory and disk as they were, kept to start new sandboxes from. */
+/** A machine's memory and disk as they were, kept to start new machines from. */
 public final class Snapshots {
   private final Transport t;
 
   public Snapshots(Transport t) {
     this.t = t;
+  }
+
+  /** A change to a snapshot, an image version or a volume: each field left out stays as it is. */
+  public static final class StoredUpdate {
+    /** Seconds from now until Runtime deletes it, as its delete does: final, and it can't be undone. Sent again before then, it renews it; 0 takes its end off (kept until deleted). At least 0. At most 315360000. */
+    public Long deleteAfterSeconds;
+
+    /** true refuses its delete (409 `delete_protected`) until an update sends false. Not while it has a `deleteAt`, unless the same update sends `deleteAfterSeconds` 0. */
+    public Boolean deleteProtection;
+
+    public StoredUpdate deleteAfterSeconds(Long v) {
+      this.deleteAfterSeconds = v;
+      return this;
+    }
+
+    public StoredUpdate deleteProtection(Boolean v) {
+      this.deleteProtection = v;
+      return this;
+    }
+
+    static StoredUpdate of(Object raw) {
+      Map<String, Object> m = KitJson.object(raw);
+      StoredUpdate o = new StoredUpdate();
+      o.deleteAfterSeconds = KitJson.asLong(m.get("deleteAfterSeconds"));
+      o.deleteProtection = (m.get("deleteProtection") instanceof Boolean b ? b : null);
+      return o;
+    }
+
+    Map<String, Object> toMap() {
+      Map<String, Object> m = new LinkedHashMap<>();
+      if (deleteAfterSeconds != null) m.put("deleteAfterSeconds", deleteAfterSeconds);
+      if (deleteProtection != null) m.put("deleteProtection", deleteProtection);
+      return m;
+    }
   }
 
   /** What list takes in its query. */
@@ -27,7 +61,7 @@ public final class Snapshots {
     /** Only those with every label given (repeat it for several): key:value, or a key for any value. */
     public List<String> label;
 
-    /** Only those taken of this sandbox (or other machine), by its ID; a deleted one's snapshots too. */
+    /** Only those taken of this machine, by its ID; a deleted one's snapshots too. */
     public String sandbox;
 
     /** Where the page starts: a page's `next`. */
@@ -78,19 +112,50 @@ public final class Snapshots {
     }
   }
 
+  /** What get takes in its query. */
+  public static final class SnapshotGetQuery {
+    /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+    public Double wait;
+
+    /** The state the caller last read, which `wait` waits for it to leave. */
+    public String ifState;
+
+    public SnapshotGetQuery wait(Double v) {
+      this.wait = v;
+      return this;
+    }
+
+    public SnapshotGetQuery ifState(String v) {
+      this.ifState = v;
+      return this;
+    }
+
+    Map<String, Object> query() {
+      Map<String, Object> q = new LinkedHashMap<>();
+      if (wait != null) q.put("wait", String.valueOf(wait));
+      if (ifState != null) q.put("ifState", String.valueOf(ifState));
+      return q;
+    }
+  }
+
   /** Lists the project's snapshots, newest first. */
   public Page<Stored> list(SnapshotListQuery query, Transport.RequestOptions opts) {
     return Page.of(t.request("GET", "/v2/snapshots", query == null ? null : query.query(), null, new Transport.Call(true, null), opts), Stored::of);
   }
 
   /** Returns a snapshot. */
-  public Stored get(String id, Transport.RequestOptions opts) {
-    return Stored.of(t.request("GET", "/v2/snapshots/" + Transport.path(id), null, null, new Transport.Call(true, null), opts));
+  public Stored get(String id, SnapshotGetQuery query, Transport.RequestOptions opts) {
+    return Stored.of(t.request("GET", "/v2/snapshots/" + Transport.path(id), query == null ? null : query.query(), null, new Transport.Call(true, null), opts));
   }
 
   /** Deletes a snapshot, its memory and its disk. */
   public Stored delete(String id, Transport.RequestOptions opts) {
     return Stored.of(t.request("DELETE", "/v2/snapshots/" + Transport.path(id), null, null, new Transport.Call(false, null), opts));
+  }
+
+  /** Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is. */
+  public Stored update(String id, StoredUpdate input, Transport.RequestOptions opts) {
+    return Stored.of(t.request("POST", "/v2/snapshots/" + Transport.path(id) + ":update", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
 }

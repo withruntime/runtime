@@ -26,6 +26,7 @@ Query:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `key` | string | No | One key's spend too, by its ID: a key the caller may see (its own holder's, or any for an owner or admin); any other is 404. |
+| `by` | list of string | No | Splits too (repeat it for both): `hour`, what each product used each hour (`hours`); `key`, what each key used this month (`keys`). |
 
 Returns a [Usage](#usage).
 
@@ -55,8 +56,8 @@ result = runtime.usage.get()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.usage.get
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.usage.get
 ```
 
 ```bash title="CLI"
@@ -78,7 +79,7 @@ Query:
 | `since` | string (RFC 3339) | Yes | The range's first moment, inclusive (UTC, RFC 3339). |
 | `until` | string (RFC 3339) | Yes | The range's end, exclusive (UTC, RFC 3339). |
 | `by` | string | No | What the range selects lines by: `hour`, each line's hour's start, or `settled`, its settledAt (its hour's end), of hours that have ended. Ranges by `settled`, each from the last one's end to no later than `finalThrough`, read every line once, final. Default: "hour". |
-| `resourceId` | list of string | No | Only the usage of these resources (repeat it for several, up to 100): each line's `resourceId`, such as a sandbox's ID. |
+| `resourceId` | list of string | No | Only the usage of these resources (repeat it for several, up to 100): each line's `resourceId`, such as a machine's ID. |
 | `cursor` | string | No | Where the page starts: a page's `next`. |
 | `limit` | integer | No | At most this many machine-hours. At least 1. At most 500. Default: 100. |
 
@@ -110,8 +111,8 @@ result = runtime.usage.export(since="example", until="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.usage.export(since: "example", until: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.usage.export(since: "example", until: "example")
 ```
 
 ```bash title="CLI"
@@ -163,10 +164,48 @@ The spend cap a key's creates are held to, and what is left under it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `cap` | string (US dollars, decimal) | Yes | The most its holder's sandboxes may spend over windowSeconds, in US dollars. |
+| `cap` | string (US dollars, decimal) | Yes | The most its holder's machines may spend over windowSeconds, in US dollars. |
 | `spent` | string (US dollars, decimal) | Yes | What they spent over the window, in US dollars, as the cap counts it. |
 | `remaining` | string (US dollars, decimal) | Yes | What is left: cap less spent, never below 0. Once 0, a create is refused 403 until the window passes it. |
 | `windowSeconds` | integer | Yes | The rolling window the cap counts over, in seconds. |
+
+### UsageHour
+
+One product's use in one hour, at the card's prices.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `at` | string (RFC 3339) | Yes | The hour's first moment (UTC). |
+| `product` | string | Yes | What it was used by: the machine's kind (`sandbox`, `app`, `function`, `ci`, ...), what is kept on disk (`disk`, `volume`, `snapshot`, `image`), or `traffic`, what was sent out; `machine` or `storage` when what used it was deleted too long ago to name. |
+| `charged` | string (US dollars, decimal) | Yes | What it costs on the price card, before any credit, in US dollars. |
+
+### ProductLine
+
+One meter's part of one product's month: a quantity at the card's rate.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `product` | string | Yes | What it was used by, as `hours` names it (`sandbox`, `disk`, `traffic`, ...). |
+| `meter` | string | Yes | The card's meter (`cpu`, `memory`, `traffic-out`, ...). |
+| `name` | string | Yes | The meter's name on the card (`CPU`, `Memory`), from `names::METERS`. |
+| `quantity` | string | Yes | Used this month, in `unit`, as a decimal in text. |
+| `unit` | string | Yes | What `quantity` counts: `active vCPU-hours`, `GiB-hours`, `GiB-months`, `GB`, ... |
+| `rate` | string | Yes | The card's price for one of `unit`, as the card writes it (`$0.03 per active vCPU-hour`). |
+| `charged` | string (US dollars, decimal) | Yes | What it costs on the price card, before any credit, in US dollars. |
+
+### KeySpend
+
+What one key, or what was made with no key, used this month.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `keyId` | string | No | The key the machines and storage were made with. Omitted for what was made with no key (signed in to the console), and for `others`. |
+| `name` | string | No | The key's name. |
+| `accountId` | string | No | The person the key acts for, or who made it signed in to the console. |
+| `email` | string | No | That person's email address. |
+| `agentId` | string | No | The agent or CI pipeline the key acts as. |
+| `source` | string | Yes | `key`: one key's. `console`: made signed in, with no key. `others`: keys the caller may not see, together. `unknown`: made by something deleted too long ago to name. |
+| `charged` | string (US dollars, decimal) | Yes | Charged this month at the card's rates, in US dollars. |
 
 ### Usage
 
@@ -186,6 +225,9 @@ What the org has used and has left, at the card's prices.
 | `spendCap` | string (US dollars, decimal) | No | The org's own cap on a month's charges, in US dollars. |
 | `key` | [KeyUsage](#keyusage) | No | One key's spend, when the call names it (`key`). |
 | `keySpendCap` | [KeySpendCap](#keyspendcap) | No | The spend cap this key's creates are held to: the tightest of its own, those of the keys it was made with, and its holder's grants'. Omitted when none holds it. |
+| `hours` | list of [UsageHour](#usagehour) | No | With `by=hour`: what each product used each hour, since the month began or 7 days ago, whichever is earlier, oldest first. Only hours that cost something. |
+| `lines` | list of [ProductLine](#productline) | No | With `by=hour`: what each product's month is made of, a line for each meter it used, its quantity at the card's rate. A product's lines sum to its hours since the month began. |
+| `keys` | list of [KeySpend](#keyspend) | No | With `by=key`: what each key's machines and storage used this month, most first. A key the caller may not see is counted under `others`. |
 
 ### UsageLine
 
@@ -195,7 +237,7 @@ One meter of one machine's, disk's or address's hour, as measured, at the card's
 | --- | --- | --- | --- |
 | `id` | string | Yes | The line's ID: the same line has the same ID on every read. |
 | `subjectId` | string | Yes | The resource it was used by: a machine, a disk or an address. |
-| `resourceId` | string | Yes | The ID its product names it by (a sandbox's own ID). |
+| `resourceId` | string | Yes | The ID its product names it by (a machine's own ID). |
 | `projectId` | string | Yes | Its project. |
 | `meter` | string | Yes | The card's meter (`cpu`, `memory`, `standard`, `traffic-out`, ...). |
 | `startsAt` | string (RFC 3339) | Yes | The hour's first moment (UTC). |

@@ -50,13 +50,13 @@ public final class Keys {
     /** The most one request made with it commits, in US dollars. */
     public String maxCost;
 
-    /** The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. */
+    /** The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. */
     public String spendCap;
 
     /** The rolling window spendCap counts over, in seconds. */
     public Long spendCapWindowSeconds;
 
-    /** What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its sandboxes' and those of every key made with it. Listed and updated keys only. */
+    /** What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its machines' and those of every key made with it. Listed and updated keys only. */
     public String spent;
 
     /** When it was revoked: a delete's answer, its state `deleted`. */
@@ -244,13 +244,16 @@ public final class Keys {
     /** One of the organization's agents or CI pipelines it acts as, for the caller; the caller itself when omitted. */
     public String agentId;
 
+    /** The actions it holds, each `product:action` as each call's reference page names it (`sandboxes:create`, `sandboxes:exec`), on every plan: it acts as an agent of its own granted exactly these, never more than its caller may do or spend, in every project its caller reaches (one held to one project, with projectId or by a caller that reaches one alone, starts at Growth), and its agent and role are deleted with it. Omitted, it holds every action its holder's grant allows, or, made with a key that has actions, those actions. Not with agentId. */
+    public List<String> actions;
+
     /** Seconds until it stops working; never when omitted. At least 60. At most 31536000. */
     public Long expiresInSeconds;
 
     /** The most one request made with it may commit, in US dollars (`"5.00"`): one asking more is refused 403, and a create that names no maxCost gets this one. Made with a key that has one, at most that key's. */
     public String maxCost;
 
-    /** The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running sandboxes may pass it. Made with a key that has one, at most that key's, and counted in it too. */
+    /** The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running machines may pass it. Made with a key that has one, at most that key's, and counted in it too. */
     public String spendCap;
 
     /** The rolling window spendCap counts over, in seconds; a day when omitted. At least 60. At most 2592000. */
@@ -274,6 +277,11 @@ public final class Keys {
 
     public KeyCreate agentId(String v) {
       this.agentId = v;
+      return this;
+    }
+
+    public KeyCreate actions(List<String> v) {
+      this.actions = v;
       return this;
     }
 
@@ -313,6 +321,7 @@ public final class Keys {
       o.name = KitJson.asString(m.get("name"));
       o.projectId = KitJson.asString(m.get("projectId"));
       o.agentId = KitJson.asString(m.get("agentId"));
+      o.actions = KitJson.asStringList(m.get("actions"));
       o.expiresInSeconds = KitJson.asLong(m.get("expiresInSeconds"));
       o.maxCost = KitJson.asString(m.get("maxCost"));
       o.spendCap = KitJson.asString(m.get("spendCap"));
@@ -327,6 +336,7 @@ public final class Keys {
       if (name != null) m.put("name", name);
       if (projectId != null) m.put("projectId", projectId);
       if (agentId != null) m.put("agentId", agentId);
+      if (actions != null) m.put("actions", actions);
       if (expiresInSeconds != null) m.put("expiresInSeconds", expiresInSeconds);
       if (maxCost != null) m.put("maxCost", maxCost);
       if (spendCap != null) m.put("spendCap", spendCap);
@@ -372,13 +382,13 @@ public final class Keys {
     /** The most one request made with it commits, in US dollars. */
     public String maxCost;
 
-    /** The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. */
+    /** The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. */
     public String spendCap;
 
     /** The rolling window spendCap counts over, in seconds. */
     public Long spendCapWindowSeconds;
 
-    /** What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its sandboxes' and those of every key made with it. Listed and updated keys only. */
+    /** What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its machines' and those of every key made with it. Listed and updated keys only. */
     public String spent;
 
     /** When it was revoked: a delete's answer, its state `deleted`. */
@@ -529,7 +539,7 @@ public final class Keys {
     /** The most one request made with it may commit, in US dollars (`"5.00"`). Never more than a key it was made with, nor than the key that changes it: a key never raises its own caps. */
     public String maxCost;
 
-    /** The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it. */
+    /** The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it. */
     public String spendCap;
 
     /** The rolling window spendCap counts over, in seconds; kept when omitted, a day for a key that had no spendCap. At least 60. At most 2592000. */

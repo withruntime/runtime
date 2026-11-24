@@ -73,7 +73,7 @@ type Options struct {
 	// key, or a key pair's rtsk_ secret, which signs each request and is
 	// never sent.
 	APIKey string
-	// Project is the one a key pair's signed requests act in; it defaults
+	// Project is the one every call acts in (Runtime-Project), and a key pair signs for; it defaults
 	// to the RUNTIME_PROJECT environment variable.
 	Project string
 	// BaseURL defaults to RUNTIME_API_URL, then https://api.withruntime.com.
@@ -121,12 +121,16 @@ var (
 	ErrUnauthorized = &Error{Code: "unauthorized", Status: 401}
 	// ErrPaymentRequired is `payment_required` (402): Add a card in the console; the work paused for payment resumes. Nothing was deleted.
 	ErrPaymentRequired = &Error{Code: "payment_required", Status: 402}
+	// ErrCardRequired is `card_required` (402): Add a card at https://withruntime.com/account/start to start the trial, then send the request again.
+	ErrCardRequired = &Error{Code: "card_required", Status: 402}
 	// ErrForbidden is `forbidden` (403): Use a key whose grants include this action, or ask an owner of the organization.
 	ErrForbidden = &Error{Code: "forbidden", Status: 403}
 	// ErrLimitExceeded is `limit_exceeded` (403): Stay within the limit details names: delete what you no longer need, ask for less, or raise the limit.
 	ErrLimitExceeded = &Error{Code: "limit_exceeded", Status: 403}
 	// ErrNotFound is `not_found` (404): Check the ID or path; list the resources to find it.
 	ErrNotFound = &Error{Code: "not_found", Status: 404}
+	// ErrMethodNotAllowed is `method_not_allowed` (405): Send it with a method the Allow header names.
+	ErrMethodNotAllowed = &Error{Code: "method_not_allowed", Status: 405}
 	// ErrAlreadyExists is `already_exists` (409): Use another name, or get the one that exists.
 	ErrAlreadyExists = &Error{Code: "already_exists", Status: 409}
 	// ErrConflict is `conflict` (409): Get it again and send the request once it is in a state the call takes.
@@ -147,12 +151,10 @@ var (
 	ErrTimeout = &Error{Code: "timeout", Status: 504}
 )
 
-
-
-// all is every item of every page fetch reads, each page read as the last is used up.
-func all[T any](fetch func(cursor *string) (*Page[T], error)) iter.Seq2[T, error] {
+// all is every item of every page fetch reads from cursor (nil: the first page), each page read as the last is used
+// up.
+func all[T any](cursor *string, fetch func(cursor *string) (*Page[T], error)) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
-		var cursor *string
 		for {
 			p, err := fetch(cursor)
 			if err != nil {
@@ -324,6 +326,11 @@ func authorize(req *http.Request, apiKey, project, idempotencyKey string, body [
 	rest, signed := strings.CutPrefix(apiKey, signingKeyPrefix)
 	if !signed {
 		req.Header.Set("authorization", "Bearer "+apiKey)
+		// The project goes with every call, a bearer key's too: a key that reaches the whole org would otherwise
+		// list, change and delete in every project.
+		if project != "" {
+			req.Header.Set("runtime-project", project)
+		}
 		return nil
 	}
 	credentialHex, seedHex, _ := strings.Cut(rest, "_")
@@ -379,7 +386,7 @@ type Call struct {
 	// RunsSeconds, or to its end when nil or 0. Its answer begins at once; an error
 	// after that is said in its body, and a cut one is followed on by
 	// sending it again under the same idempotency key.
-	Runs   bool
+	Runs        bool
 	RunsSeconds *float64
 }
 

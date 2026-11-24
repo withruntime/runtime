@@ -38,6 +38,9 @@ public final class Events {
     /** The exit code of a run that ended. */
     public Long exitCode;
 
+    /** When the resource's pause began (or its run ended), on an event of it paused or stopped. */
+    public String pausedAt;
+
     /** When it happened. */
     public String createdAt;
 
@@ -76,6 +79,11 @@ public final class Events {
       return this;
     }
 
+    public Event pausedAt(String v) {
+      this.pausedAt = v;
+      return this;
+    }
+
     public Event createdAt(String v) {
       this.createdAt = v;
       return this;
@@ -91,6 +99,7 @@ public final class Events {
       o.state = KitJson.asString(m.get("state"));
       o.reason = KitJson.asString(m.get("reason"));
       o.exitCode = KitJson.asLong(m.get("exitCode"));
+      o.pausedAt = KitJson.asString(m.get("pausedAt"));
       o.createdAt = KitJson.asString(m.get("createdAt"));
       return o;
     }
@@ -104,6 +113,7 @@ public final class Events {
       if (state != null) m.put("state", state);
       if (reason != null) m.put("reason", reason);
       if (exitCode != null) m.put("exitCode", exitCode);
+      if (pausedAt != null) m.put("pausedAt", pausedAt);
       if (createdAt != null) m.put("createdAt", createdAt);
       return m;
     }

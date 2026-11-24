@@ -5,161 +5,161 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # One of the org's own machines or routers on a tunnel.
-    # - +id+: Its ID.
-    # - +name+: Its name, unique in the tunnel.
-    # - +public_key+: Its WireGuard public key.
-    # - +address+: Its address in the tunnel's subnet.
-    # - +routes+: The org's own ranges behind it that sandboxes may reach.
-    # - +created_at+: When it was added.
-    # - +rotated_at+: When its key was last replaced.
-    TunnelPeer = Struct.new(:id, :name, :public_key, :address, :routes, :created_at, :rotated_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # One of the org's own machines or routers on a tunnel.
+  # - +id+: Its ID.
+  # - +name+: Its name, unique in the tunnel.
+  # - +public_key+: Its WireGuard public key.
+  # - +address+: Its address in the tunnel's subnet.
+  # - +routes+: The org's own ranges behind it that machines may reach.
+  # - +created_at+: When it was added.
+  # - +rotated_at+: When its key was last replaced.
+  TunnelPeer = Struct.new(:id, :name, :public_key, :address, :routes, :created_at, :rotated_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          id: h["id"],
-          name: h["name"],
-          public_key: h["publicKey"],
-          address: h["address"],
-          routes: h["routes"],
-          created_at: h["createdAt"],
-          rotated_at: h["rotatedAt"],
-        )
-      end
-
-      def to_wire
-        {
-          "id" => self.id,
-          "name" => self.name,
-          "publicKey" => self.public_key,
-          "address" => self.address,
-          "routes" => self.routes,
-          "createdAt" => self.created_at,
-          "rotatedAt" => self.rotated_at,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        name: h["name"],
+        public_key: h["publicKey"],
+        address: h["address"],
+        routes: h["routes"],
+        created_at: h["createdAt"],
+        rotated_at: h["rotatedAt"],
+      )
     end
 
-    # A sandbox's address in a tunnel's subnet.
-    # - +sandbox_id+: The sandbox.
-    # - +address+: Its address in the subnet.
-    TunnelMember = Struct.new(:sandbox_id, :address, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "id" => self.id,
+        "name" => self.name,
+        "publicKey" => self.public_key,
+        "address" => self.address,
+        "routes" => self.routes,
+        "createdAt" => self.created_at,
+        "rotatedAt" => self.rotated_at,
+      }.compact
+    end
+  end
 
-        new(
-          sandbox_id: h["sandboxId"],
-          address: h["address"],
-        )
-      end
+  # A machine's address in a tunnel's subnet.
+  # - +sandbox_id+: The machine.
+  # - +address+: Its address in the subnet.
+  TunnelMember = Struct.new(:sandbox_id, :address, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "sandboxId" => self.sandbox_id,
-          "address" => self.address,
-        }.compact
-      end
+      new(
+        sandbox_id: h["sandboxId"],
+        address: h["address"],
+      )
     end
 
-    # A WireGuard tunnel's settings, as it keeps them; its gateway's private key is kept sealed and never answered.
-    # - +subnet+: Its private IPv4 range, /16 to /24.
-    # - +gateway_address+: The gateway's address in the subnet.
-    # - +endpoint+: Where peers send WireGuard: address:port.
-    # - +gateway_public_key+: The gateway's WireGuard public key; none until the gateway has made its pair.
-    # - +rate+: Its monthly price when it was made, in US dollars (`"5.00"`); it does not change.
-    # - +peers+: The org's machines and routers on it.
-    # - +members+: Each sandbox's address in the subnet.
-    TunnelSettings = Struct.new(:subnet, :gateway_address, :endpoint, :gateway_public_key, :rate, :peers, :members, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "sandboxId" => self.sandbox_id,
+        "address" => self.address,
+      }.compact
+    end
+  end
 
-        new(
-          subnet: h["subnet"],
-          gateway_address: h["gatewayAddress"],
-          endpoint: h["endpoint"],
-          gateway_public_key: h["gatewayPublicKey"],
-          rate: h["rate"],
-          peers: h["peers"]&.map { |i| TunnelPeer.from(i) },
-          members: h["members"]&.map { |i| TunnelMember.from(i) },
-        )
-      end
+  # A WireGuard tunnel's settings, as it keeps them; its gateway's private key is kept sealed and never answered.
+  # - +subnet+: Its private IPv4 range, /16 to /24.
+  # - +gateway_address+: The gateway's address in the subnet.
+  # - +endpoint+: Where peers send WireGuard: address:port.
+  # - +gateway_public_key+: The gateway's WireGuard public key; none until the gateway has made its pair.
+  # - +rate+: Its monthly price when it was made, in US dollars (`"5.00"`); it does not change.
+  # - +peers+: The org's machines and routers on it.
+  # - +members+: Each machine's address in the subnet.
+  TunnelSettings = Struct.new(:subnet, :gateway_address, :endpoint, :gateway_public_key, :rate, :peers, :members, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "subnet" => self.subnet,
-          "gatewayAddress" => self.gateway_address,
-          "endpoint" => self.endpoint,
-          "gatewayPublicKey" => self.gateway_public_key,
-          "rate" => self.rate,
-          "peers" => self.peers&.map { |i| i&.to_wire },
-          "members" => self.members&.map { |i| i&.to_wire },
-        }.compact
-      end
+      new(
+        subnet: h["subnet"],
+        gateway_address: h["gatewayAddress"],
+        endpoint: h["endpoint"],
+        gateway_public_key: h["gatewayPublicKey"],
+        rate: h["rate"],
+        peers: h["peers"]&.map { |i| TunnelPeer.from(i) },
+        members: h["members"]&.map { |i| TunnelMember.from(i) },
+      )
     end
 
-    # A WireGuard tunnel from the org's own network into its sandboxes.
-    # - +subnet+: Its private IPv4 range, /16 to /24.
-    # - +gateway_address+: The gateway's address in the subnet.
-    # - +endpoint+: Where peers send WireGuard: address:port.
-    # - +gateway_public_key+: The gateway's WireGuard public key; none until the gateway has made its pair.
-    # - +rate+: Its monthly price when it was made, in US dollars (`"5.00"`); it does not change.
-    # - +peers+: The org's machines and routers on it.
-    # - +members+: Each sandbox's address in the subnet.
-    # - +id+: Its ID.
-    # - +object+: Always `tunnel`.
-    # - +state+: Its state: `ready` once its gateway answers.
-    # - +disabled+: Turned off: no traffic passes.
-    # - +created_at+: When it was made.
-    Tunnel = Struct.new(:subnet, :gateway_address, :endpoint, :gateway_public_key, :rate, :peers, :members, :id, :object, :state, :disabled, :created_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "subnet" => self.subnet,
+        "gatewayAddress" => self.gateway_address,
+        "endpoint" => self.endpoint,
+        "gatewayPublicKey" => self.gateway_public_key,
+        "rate" => self.rate,
+        "peers" => self.peers&.map { |i| i&.to_wire },
+        "members" => self.members&.map { |i| i&.to_wire },
+      }.compact
+    end
+  end
 
-        new(
-          subnet: h["subnet"],
-          gateway_address: h["gatewayAddress"],
-          endpoint: h["endpoint"],
-          gateway_public_key: h["gatewayPublicKey"],
-          rate: h["rate"],
-          peers: h["peers"]&.map { |i| TunnelPeer.from(i) },
-          members: h["members"]&.map { |i| TunnelMember.from(i) },
-          id: h["id"],
-          object: h["object"],
-          state: h["state"],
-          disabled: h["disabled"],
-          created_at: h["createdAt"],
-        )
-      end
+  # A WireGuard tunnel from the org's own network into its machines.
+  # - +subnet+: Its private IPv4 range, /16 to /24.
+  # - +gateway_address+: The gateway's address in the subnet.
+  # - +endpoint+: Where peers send WireGuard: address:port.
+  # - +gateway_public_key+: The gateway's WireGuard public key; none until the gateway has made its pair.
+  # - +rate+: Its monthly price when it was made, in US dollars (`"5.00"`); it does not change.
+  # - +peers+: The org's machines and routers on it.
+  # - +members+: Each machine's address in the subnet.
+  # - +id+: Its ID.
+  # - +object+: Always `tunnel`.
+  # - +state+: Its state: `ready` once its gateway answers.
+  # - +disabled+: Turned off: no traffic passes.
+  # - +created_at+: When it was made.
+  Tunnel = Struct.new(:subnet, :gateway_address, :endpoint, :gateway_public_key, :rate, :peers, :members, :id, :object, :state, :disabled, :created_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "subnet" => self.subnet,
-          "gatewayAddress" => self.gateway_address,
-          "endpoint" => self.endpoint,
-          "gatewayPublicKey" => self.gateway_public_key,
-          "rate" => self.rate,
-          "peers" => self.peers&.map { |i| i&.to_wire },
-          "members" => self.members&.map { |i| i&.to_wire },
-          "id" => self.id,
-          "object" => self.object,
-          "state" => self.state,
-          "disabled" => self.disabled,
-          "createdAt" => self.created_at,
-        }.compact
-      end
+      new(
+        subnet: h["subnet"],
+        gateway_address: h["gatewayAddress"],
+        endpoint: h["endpoint"],
+        gateway_public_key: h["gatewayPublicKey"],
+        rate: h["rate"],
+        peers: h["peers"]&.map { |i| TunnelPeer.from(i) },
+        members: h["members"]&.map { |i| TunnelMember.from(i) },
+        id: h["id"],
+        object: h["object"],
+        state: h["state"],
+        disabled: h["disabled"],
+        created_at: h["createdAt"],
+      )
     end
 
-    # A WireGuard tunnel from your own network into your sandboxes.
-    class Tunnels
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "subnet" => self.subnet,
+        "gatewayAddress" => self.gateway_address,
+        "endpoint" => self.endpoint,
+        "gatewayPublicKey" => self.gateway_public_key,
+        "rate" => self.rate,
+        "peers" => self.peers&.map { |i| i&.to_wire },
+        "members" => self.members&.map { |i| i&.to_wire },
+        "id" => self.id,
+        "object" => self.object,
+        "state" => self.state,
+        "disabled" => self.disabled,
+        "createdAt" => self.created_at,
+      }.compact
+    end
+  end
 
-      # Lists the org's WireGuard tunnels.
-      def list(cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/tunnels", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Tunnel.from(i) }
-      end
+  # A WireGuard tunnel from your own network into your machines.
+  class Tunnels
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Lists the org's WireGuard tunnels.
+    def list(cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/tunnels", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Tunnel.from(i) }
     end
   end
 end

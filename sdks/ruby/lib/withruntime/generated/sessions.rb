@@ -5,139 +5,139 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # A session to make.
-    # - +machine_id+: The machine it reaches (a sandbox, an app, a desktop, any machine), by its ID.
-    # - +expires_in_seconds+: Seconds until it stops working, 60 to 86400; 3600 when omitted. Never past the key that makes it. At least 60. At most 86400.
-    # - +name+: Its name: your own handle for it, such as the user it is for. At least 1 character. At most 64 characters.
-    SessionCreate = Struct.new(:machine_id, :expires_in_seconds, :name, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A session to make.
+  # - +machine_id+: The machine it reaches (a sandbox, an app, a desktop, any machine), by its ID.
+  # - +expires_in_seconds+: Seconds until it stops working, 60 to 86400; 3600 when omitted. Never past the key that makes it. At least 60. At most 86400.
+  # - +name+: Its name: your own handle for it, such as the user it is for. At least 1 character. At most 64 characters.
+  SessionCreate = Struct.new(:machine_id, :expires_in_seconds, :name, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          machine_id: h["machineId"],
-          expires_in_seconds: h["expiresInSeconds"],
-          name: h["name"],
-        )
-      end
-
-      def to_wire
-        {
-          "machineId" => self.machine_id,
-          "expiresInSeconds" => self.expires_in_seconds,
-          "name" => self.name,
-        }.compact
-      end
+      new(
+        machine_id: h["machineId"],
+        expires_in_seconds: h["expiresInSeconds"],
+        name: h["name"],
+      )
     end
 
-    # A session: a token for one machine, for a frontend.
-    # - +id+: Its ID.
-    # - +object+: Always `session`.
-    # - +machine_id+: The machine it reaches, alone.
-    # - +name+: Its name, as its maker gave it.
-    # - +account_id+: The person it acts as or for.
-    # - +agent_id+: The agent or CI pipeline it acts as.
-    # - +state+: `active` while it works; `deleted` once ended: a delete's answer.
-    # - +created_at+: When it was made.
-    # - +expires_at+: When it stops working: its own end, or the end of the key that made it, the sooner.
-    # - +deleted_at+: When a delete ended it, or a revoke of the key that made it: a delete's answer, and a create's sent again once it ended. Omitted for one that ended at `expiresAt`.
-    Session = Struct.new(:id, :object, :machine_id, :name, :account_id, :agent_id, :state, :created_at, :expires_at, :deleted_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "machineId" => self.machine_id,
+        "expiresInSeconds" => self.expires_in_seconds,
+        "name" => self.name,
+      }.compact
+    end
+  end
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          machine_id: h["machineId"],
-          name: h["name"],
-          account_id: h["accountId"],
-          agent_id: h["agentId"],
-          state: h["state"],
-          created_at: h["createdAt"],
-          expires_at: h["expiresAt"],
-          deleted_at: h["deletedAt"],
-        )
-      end
+  # A session: a token for one machine, for a frontend.
+  # - +id+: Its ID.
+  # - +object+: Always `session`.
+  # - +machine_id+: The machine it reaches, alone.
+  # - +name+: Its name, as its maker gave it.
+  # - +account_id+: The person it acts as or for.
+  # - +agent_id+: The agent or CI pipeline it acts as.
+  # - +state+: `active` while it works; `deleted` once ended: a delete's answer.
+  # - +created_at+: When it was made.
+  # - +expires_at+: When it stops working: its own end, or the end of the key that made it, the sooner.
+  # - +deleted_at+: When a delete ended it, or a revoke of the key that made it: a delete's answer, and a create's sent again once it ended. Omitted for one that ended at `expiresAt`.
+  Session = Struct.new(:id, :object, :machine_id, :name, :account_id, :agent_id, :state, :created_at, :expires_at, :deleted_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "machineId" => self.machine_id,
-          "name" => self.name,
-          "accountId" => self.account_id,
-          "agentId" => self.agent_id,
-          "state" => self.state,
-          "createdAt" => self.created_at,
-          "expiresAt" => self.expires_at,
-          "deletedAt" => self.deleted_at,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        object: h["object"],
+        machine_id: h["machineId"],
+        name: h["name"],
+        account_id: h["accountId"],
+        agent_id: h["agentId"],
+        state: h["state"],
+        created_at: h["createdAt"],
+        expires_at: h["expiresAt"],
+        deleted_at: h["deletedAt"],
+      )
     end
 
-    # A session just made, with its token: shown this once, never again.
-    # - +id+: Its ID.
-    # - +object+: Always `session`.
-    # - +machine_id+: The machine it reaches, alone.
-    # - +name+: Its name, as its maker gave it.
-    # - +account_id+: The person it acts as or for.
-    # - +agent_id+: The agent or CI pipeline it acts as.
-    # - +state+: `active` while it works; `deleted` once ended: a delete's answer.
-    # - +created_at+: When it was made.
-    # - +expires_at+: When it stops working: its own end, or the end of the key that made it, the sooner.
-    # - +deleted_at+: When a delete ended it, or a revoke of the key that made it: a delete's answer, and a create's sent again once it ended. Omitted for one that ended at `expiresAt`.
-    # - +token+: The token, to send as `Authorization: Bearer <token>` from the frontend.
-    SessionCreated = Struct.new(:id, :object, :machine_id, :name, :account_id, :agent_id, :state, :created_at, :expires_at, :deleted_at, :token, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "id" => self.id,
+        "object" => self.object,
+        "machineId" => self.machine_id,
+        "name" => self.name,
+        "accountId" => self.account_id,
+        "agentId" => self.agent_id,
+        "state" => self.state,
+        "createdAt" => self.created_at,
+        "expiresAt" => self.expires_at,
+        "deletedAt" => self.deleted_at,
+      }.compact
+    end
+  end
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          machine_id: h["machineId"],
-          name: h["name"],
-          account_id: h["accountId"],
-          agent_id: h["agentId"],
-          state: h["state"],
-          created_at: h["createdAt"],
-          expires_at: h["expiresAt"],
-          deleted_at: h["deletedAt"],
-          token: h["token"],
-        )
-      end
+  # A session just made, with its token: shown this once, never again.
+  # - +id+: Its ID.
+  # - +object+: Always `session`.
+  # - +machine_id+: The machine it reaches, alone.
+  # - +name+: Its name, as its maker gave it.
+  # - +account_id+: The person it acts as or for.
+  # - +agent_id+: The agent or CI pipeline it acts as.
+  # - +state+: `active` while it works; `deleted` once ended: a delete's answer.
+  # - +created_at+: When it was made.
+  # - +expires_at+: When it stops working: its own end, or the end of the key that made it, the sooner.
+  # - +deleted_at+: When a delete ended it, or a revoke of the key that made it: a delete's answer, and a create's sent again once it ended. Omitted for one that ended at `expiresAt`.
+  # - +token+: The token, to send as `Authorization: Bearer <token>` from the frontend.
+  SessionCreated = Struct.new(:id, :object, :machine_id, :name, :account_id, :agent_id, :state, :created_at, :expires_at, :deleted_at, :token, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "machineId" => self.machine_id,
-          "name" => self.name,
-          "accountId" => self.account_id,
-          "agentId" => self.agent_id,
-          "state" => self.state,
-          "createdAt" => self.created_at,
-          "expiresAt" => self.expires_at,
-          "deletedAt" => self.deleted_at,
-          "token" => self.token,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        object: h["object"],
+        machine_id: h["machineId"],
+        name: h["name"],
+        account_id: h["accountId"],
+        agent_id: h["agentId"],
+        state: h["state"],
+        created_at: h["createdAt"],
+        expires_at: h["expiresAt"],
+        deleted_at: h["deletedAt"],
+        token: h["token"],
+      )
     end
 
-    # A short-lived token a frontend holds to reach one machine directly: it reads the machine, runs its commands and processes, reads and writes its files, and signs its previews' links, and does nothing else. It acts as the key that made it and ends with that key.
-    class Sessions
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "id" => self.id,
+        "object" => self.object,
+        "machineId" => self.machine_id,
+        "name" => self.name,
+        "accountId" => self.account_id,
+        "agentId" => self.agent_id,
+        "state" => self.state,
+        "createdAt" => self.created_at,
+        "expiresAt" => self.expires_at,
+        "deletedAt" => self.deleted_at,
+        "token" => self.token,
+      }.compact
+    end
+  end
 
-      # Makes a session for one machine the caller reaches and returns its token this once. The token reads the machine, runs its commands and processes, reads and writes its files and signs its previews' links, and nothing else; it acts as the caller, lives `expiresInSeconds` (an hour unless asked, a day at most), never past the caller's key, and ends when that key is revoked. The API answers CORS for its calls, so a web page can make them. Sent again with the same Idempotency-Key and body, it makes none and returns 409 `conflict` with the session it made in `details.made`, without its token; with another body, 409 `idempotency_key_reused`.
-      def create(machine_id:, expires_in_seconds: nil, name: nil, idempotency_key: nil)
-        SessionCreated.from(@transport.request("POST", "/v2/sessions", body: { "machineId" => machine_id, "expiresInSeconds" => expires_in_seconds, "name" => name }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+  # A short-lived token a frontend holds to reach one machine directly: it reads the machine, runs its commands and processes, reads and writes its files, and signs its previews' links, and does nothing else. It acts as the key that made it and ends with that key.
+  class Sessions
+    attr_reader :transport
 
-      # Ends a session now: its next call is refused. Its maker ends its own; an owner or an admin, any of the organization's. Ended already, it returns 404.
-      def delete(id, idempotency_key: nil)
-        Session.from(@transport.request("DELETE", "/v2/sessions/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
-      end
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Makes a session for one machine the caller reaches and returns its token this once. The token reads the machine, runs its commands and processes, reads and writes its files and signs its previews' links, and nothing else; it acts as the caller, lives `expiresInSeconds` (an hour unless asked, a day at most), never past the caller's key, and ends when that key is revoked. The API answers CORS for its calls, so a web page can make them. Sent again with the same Idempotency-Key and body, it makes none and returns 409 `conflict` with the session it made in `details.made`, without its token; with another body, 409 `idempotency_key_reused`.
+    def create(machine_id:, expires_in_seconds: nil, name: nil, idempotency_key: nil)
+      SessionCreated.from(@transport.request("POST", "/v2/sessions", body: { "machineId" => machine_id, "expiresInSeconds" => expires_in_seconds, "name" => name }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Ends a session now: its next call is refused. Its maker ends its own; an owner or an admin, any of the organization's. Ended already, it returns 404.
+    def delete(id, idempotency_key: nil)
+      Session.from(@transport.request("DELETE", "/v2/sessions/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

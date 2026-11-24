@@ -416,7 +416,12 @@ public final class Signing {
   public static Map<String, String> authorize(
       String key, String project, String method, URI uri, String idempotencyKey, byte[] body) {
     Key k = keyFor(key, project);
-    if (k == null) return Map.of("Authorization", "Bearer " + key);
+    // The project goes with every call, a bearer key's too: a key that reaches the whole org would
+    // otherwise list, change and delete in every project.
+    if (k == null)
+      return project == null || project.isEmpty()
+          ? Map.of("Authorization", "Bearer " + key)
+          : Map.of("Authorization", "Bearer " + key, "Runtime-Project", project);
     String target = uri.getRawPath() + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery());
     return k.signRequest(project, method, target, idempotencyKey, body);
   }

@@ -50,7 +50,7 @@ export interface KeyUsage {
 
 /** The spend cap a key's creates are held to, and what is left under it. */
 export interface KeySpendCap {
-  /** The most its holder's sandboxes may spend over windowSeconds, in US dollars. */
+  /** The most its holder's machines may spend over windowSeconds, in US dollars. */
   cap: string;
   /** What they spent over the window, in US dollars, as the cap counts it. */
   spent: string;
@@ -58,6 +58,52 @@ export interface KeySpendCap {
   remaining: string;
   /** The rolling window the cap counts over, in seconds. */
   windowSeconds: number;
+}
+
+/** One product's use in one hour, at the card's prices. */
+export interface UsageHour {
+  /** The hour's first moment (UTC). */
+  at: string;
+  /** What it was used by: the machine's kind (`sandbox`, `app`, `function`, `ci`, ...), what is kept on disk (`disk`, `volume`, `snapshot`, `image`), or `traffic`, what was sent out; `machine` or `storage` when what used it was deleted too long ago to name. */
+  product: string;
+  /** What it costs on the price card, before any credit, in US dollars. */
+  charged: string;
+}
+
+/** One meter's part of one product's month: a quantity at the card's rate. */
+export interface ProductLine {
+  /** What it was used by, as `hours` names it (`sandbox`, `disk`, `traffic`, ...). */
+  product: string;
+  /** The card's meter (`cpu`, `memory`, `traffic-out`, ...). */
+  meter: string;
+  /** The meter's name on the card (`CPU`, `Memory`), from `names::METERS`. */
+  name: string;
+  /** Used this month, in `unit`, as a decimal in text. */
+  quantity: string;
+  /** What `quantity` counts: `active vCPU-hours`, `GiB-hours`, `GiB-months`, `GB`, ... */
+  unit: string;
+  /** The card's price for one of `unit`, as the card writes it (`$0.03 per active vCPU-hour`). */
+  rate: string;
+  /** What it costs on the price card, before any credit, in US dollars. */
+  charged: string;
+}
+
+/** What one key, or what was made with no key, used this month. */
+export interface KeySpend {
+  /** The key the machines and storage were made with. Omitted for what was made with no key (signed in to the console), and for `others`. */
+  keyId?: string;
+  /** The key's name. */
+  name?: string;
+  /** The person the key acts for, or who made it signed in to the console. */
+  accountId?: string;
+  /** That person's email address. */
+  email?: string;
+  /** The agent or CI pipeline the key acts as. */
+  agentId?: string;
+  /** `key`: one key's. `console`: made signed in, with no key. `others`: keys the caller may not see, together. `unknown`: made by something deleted too long ago to name. */
+  source: string;
+  /** Charged this month at the card's rates, in US dollars. */
+  charged: string;
 }
 
 /** What the org has used and has left, at the card's prices. */
@@ -86,6 +132,12 @@ export interface Usage {
   key?: KeyUsage;
   /** The spend cap this key's creates are held to: the tightest of its own, those of the keys it was made with, and its holder's grants'. Omitted when none holds it. */
   keySpendCap?: KeySpendCap;
+  /** With `by=hour`: what each product used each hour, since the month began or 7 days ago, whichever is earlier, oldest first. Only hours that cost something. */
+  hours?: UsageHour[];
+  /** With `by=hour`: what each product's month is made of, a line for each meter it used, its quantity at the card's rate. A product's lines sum to its hours since the month began. */
+  lines?: ProductLine[];
+  /** With `by=key`: what each key's machines and storage used this month, most first. A key the caller may not see is counted under `others`. */
+  keys?: KeySpend[];
 }
 
 /** One meter of one machine's, disk's or address's hour, as measured, at the card's price. */
@@ -94,7 +146,7 @@ export interface UsageLine {
   id: string;
   /** The resource it was used by: a machine, a disk or an address. */
   subjectId: string;
-  /** The ID its product names it by (a sandbox's own ID). */
+  /** The ID its product names it by (a machine's own ID). */
   resourceId: string;
   /** Its project. */
   projectId: string;
@@ -140,6 +192,8 @@ export interface UsageExport {
 export type UsageGetQuery = {
   /** One key's spend too, by its ID: a key the caller may see (its own holder's, or any for an owner or admin); any other is 404. */
   key?: string;
+  /** Splits too (repeat it for both): `hour`, what each product used each hour (`hours`); `key`, what each key used this month (`keys`). */
+  by?: string[];
 };
 
 /** What export takes in its query. */
@@ -150,7 +204,7 @@ export type UsageExportQuery = {
   until: string;
   /** What the range selects lines by: `hour`, each line's hour's start, or `settled`, its settledAt (its hour's end), of hours that have ended. Ranges by `settled`, each from the last one's end to no later than `finalThrough`, read every line once, final. Default: "hour". */
   by?: string;
-  /** Only the usage of these resources (repeat it for several, up to 100): each line's `resourceId`, such as a sandbox's ID. */
+  /** Only the usage of these resources (repeat it for several, up to 100): each line's `resourceId`, such as a machine's ID. */
   resourceId?: string[];
   /** Where the page starts: a page's `next`. */
   cursor?: string;
@@ -160,18 +214,18 @@ export type UsageExportQuery = {
 
 /** What the organization has used and has left at the price card's rates, and every limit it is held to. */
 export class UsageClient {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Returns the organization's credit and charges (everything credited and spent, what is left, and this month's use and charges by meter), its plan, and every limit it is held to with what it uses of each now; with key, that key's spend. */
-  get(query: UsageGetQuery = {}, options?: RequestOptions): Promise<Usage> {
-    return this.#t.request<Usage>("GET", `/v2/usage`, { query: { ...query }, options, idempotent: true });
+  get(query: UsageGetQuery & RequestOptions = {}, options?: RequestOptions): Promise<Usage> {
+    return this.transport.request<Usage>("GET", `/v2/usage`, { query: { ...query }, options, idempotent: true });
   }
 
   /** Returns the organization's measured usage in a time range, of every resource or only those named: each meter of each machine's, disk's or address's hour, what it used and its price at the card, oldest first, paginated. Each line settles at its hour's end and is final once finalThrough reaches it, so closed hours can be read while resources run. */
-  export(query: UsageExportQuery, options?: RequestOptions): Promise<UsageExport> {
-    return this.#t.request<UsageExport>("GET", `/v2/usage/export`, { query: { ...query }, options, idempotent: true });
+  export(query: UsageExportQuery & RequestOptions, options?: RequestOptions): Promise<UsageExport> {
+    return this.transport.request<UsageExport>("GET", `/v2/usage/export`, { query: { ...query }, options, idempotent: true });
   }
 }

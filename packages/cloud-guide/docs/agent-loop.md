@@ -63,7 +63,7 @@ Return [`exitCode`](./reference/sandboxes#process), [`stdout`](./reference/sandb
 ## One sandbox per session
 
 - Create the sandbox when the session starts, and delete it when the session ends. Label it ([`labels`](./reference/sandboxes#sandboxcreate)) with the session's ID, so you can find and delete sandboxes a crashed worker left behind with [`GET /v2/sandboxes`](./reference/sandboxes#list-sandboxes).
-- Give it a name ([`name`](./reference/sandboxes#sandboxcreate)) and set [`getOrCreate`](./reference/sandboxes#sandboxcreate) to reuse the session's sandbox after a restart: With a name: the sandbox of that name when there is one, else a new one.
+- Give it a name ([`name`](./reference/sandboxes#sandboxcreate)) and set [`getOrCreate`](./reference/sandboxes#sandboxcreate) to reuse the session's sandbox after a restart: With a name: the machine of that name when there is one, else a new one.
 - Between steps, a sandbox with nothing happening pauses by itself and resumes on the next call. See [pause and resume](./pause-and-resume).
 - To start many sessions from the same prepared state, prepare one sandbox and fork it with [`POST /v2/sandboxes/{id}:fork`](./reference/sandboxes#fork). See [snapshots and forks](./snapshots).
 

@@ -6,9 +6,9 @@ A machine that serves the static files in /site on port 8080 (as Netlify and Ver
 
 | Default | Value |
 | --- | --- |
-| vCPUs | 1 |
-| Memory | 1 GB |
-| Disk | 4 GB |
+| vCPUs | 2 |
+| Memory | 4 GB |
+| Disk | 4 GB, or its image's size when larger |
 | Image | `runtime/sites` |
 | Pauses when idle | After 60 seconds |
 

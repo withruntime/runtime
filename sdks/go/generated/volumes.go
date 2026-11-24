@@ -18,6 +18,10 @@ type VolumeCreate struct {
 	Labels map[string]string `json:"labels,omitempty"`
 	// SizeMib Its size in MiB, 64 to 409600 (400 GiB).
 	SizeMib int64 `json:"sizeMiB"`
+	// DeleteAfterSeconds Seconds until Runtime deletes it and what it holds, as its delete does: final, and it can't be undone; one attached to a machine is deleted once that machine ends. 0 or omitted: kept until deleted. At least 0. At most 315360000.
+	DeleteAfterSeconds *int64 `json:"deleteAfterSeconds,omitempty"`
+	// DeleteProtection Whether its delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`.
+	DeleteProtection *bool `json:"deleteProtection,omitempty"`
 }
 
 // VolumeListQuery is what List takes in its query.
@@ -54,18 +58,37 @@ func (q VolumeListQuery) values() url.Values {
 	return v
 }
 
+// VolumeGetQuery is what Get takes in its query.
+type VolumeGetQuery struct {
+	// Wait Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60.
+	Wait *float64
+	// IfState The state the caller last read, which `wait` waits for it to leave.
+	IfState *string
+}
+
+func (q VolumeGetQuery) values() url.Values {
+	v := url.Values{}
+	if q.Wait != nil {
+		v.Set("wait", strconv.FormatFloat(*q.Wait, 'f', -1, 64))
+	}
+	if q.IfState != nil {
+		v.Set("ifState", *q.IfState)
+	}
+	return v
+}
+
 // Volumes A disk that outlives the machines it is attached to.
 type Volumes struct {
 	t *Transport
 }
 
 // Create Creates an empty volume. Asked again with the same Idempotency-Key, it returns the same one.
-func (c *Volumes) Create(ctx context.Context, in VolumeCreate, opts *RequestOptions) (*Stored, error) {
+func (c *Volumes) Create(ctx context.Context, in VolumeCreate, opts *RequestOptions) (*Volume, error) {
 	out := new(Stored)
 	if err := c.t.Do(ctx, "POST", "/v2/volumes", nil, in, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return newVolume(c, out), nil
 }
 
 // List Lists the project's volumes, newest first.
@@ -77,28 +100,84 @@ func (c *Volumes) List(ctx context.Context, q VolumeListQuery, opts *RequestOpti
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Volumes) ListAll(ctx context.Context, q VolumeListQuery, opts *RequestOptions) iter.Seq2[Stored, error] {
-	return all(func(cursor *string) (*Page[Stored], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Stored], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
 }
 
 // Get Returns a volume.
-func (c *Volumes) Get(ctx context.Context, id string, opts *RequestOptions) (*Stored, error) {
+func (c *Volumes) Get(ctx context.Context, id string, q VolumeGetQuery, opts *RequestOptions) (*Volume, error) {
 	out := new(Stored)
-	if err := c.t.Do(ctx, "GET", "/v2/volumes/"+url.PathEscape(id), nil, nil, Call{Idempotent: true}, opts, out); err != nil {
+	if err := c.t.Do(ctx, "GET", "/v2/volumes/"+url.PathEscape(id), q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return newVolume(c, out), nil
 }
 
-// Delete Deletes a volume and what it holds. One attached to a sandbox is refused: delete the sandbox first.
+// Delete Deletes a volume and what it holds. One attached to a machine is refused: delete the machine first.
 func (c *Volumes) Delete(ctx context.Context, id string, opts *RequestOptions) (*Stored, error) {
 	out := new(Stored)
 	if err := c.t.Do(ctx, "DELETE", "/v2/volumes/"+url.PathEscape(id), nil, nil, Call{}, opts, out); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// Update Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+func (c *Volumes) Update(ctx context.Context, id string, in StoredUpdate, opts *RequestOptions) (*Stored, error) {
+	out := new(Stored)
+	if err := c.t.Do(ctx, "POST", "/v2/volumes/"+url.PathEscape(id)+":update", nil, in, Call{Idempotent: true}, opts, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Volume is one of volumes: A disk that outlives the machines it is attached to.
+type Volume struct {
+	c *Volumes
+	// Info is what it was when last read.
+	Info *Stored
+}
+
+func newVolume(c *Volumes, info *Stored) *Volume {
+	return &Volume{c: c, Info: info}
+}
+
+// ID is its id.
+func (s *Volume) ID() string { return s.Info.ID }
+
+// Refresh Returns a volume.
+func (s *Volume) Refresh(ctx context.Context, q *VolumeGetQuery, opts *RequestOptions) error {
+	var qb VolumeGetQuery
+	if q != nil {
+		qb = *q
+	}
+	got, err := s.c.Get(ctx, s.Info.ID, qb, opts)
+	if err != nil {
+		return err
+	}
+	s.Info = got.Info
+	return nil
+}
+
+// Delete Deletes a volume and what it holds. One attached to a machine is refused: delete the machine first.
+func (s *Volume) Delete(ctx context.Context, opts *RequestOptions) (*Stored, error) {
+	return s.c.Delete(ctx, s.Info.ID, opts)
+}
+
+// Update Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+func (s *Volume) Update(ctx context.Context, in *StoredUpdate, opts *RequestOptions) error {
+	var b StoredUpdate
+	if in != nil {
+		b = *in
+	}
+	got, err := s.c.Update(ctx, s.Info.ID, b, opts)
+	if err != nil {
+		return err
+	}
+	s.Info = got
+	return nil
 }

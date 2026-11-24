@@ -2,7 +2,7 @@
 
 ## Connections out
 
-By default a sandbox can connect to the internet. [`PUT /v2/sandboxes/{id}/network`](./reference/sandboxes#setnetwork) replaces its rules with a [NetworkRules](./reference/sandboxes#networkrules): Replaces where a sandbox may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut.
+By default a machine can connect to the internet. [`PUT /v2/sandboxes/{id}/network`](./reference/sandboxes#setnetwork) replaces its rules with a [NetworkRules](./reference/sandboxes#networkrules): Replaces where a sandbox may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut.
 
 - [`allowOutbound`](./reference/sandboxes#networkrules): The only places it may reach, each a host, `*.` and a name for every name under it, an address or a CIDR (`[` and `]` around an IPv6 address), every port when it names none; `:port` for that port alone, on a host name for a port beyond 80 and 443, which go together. `*` is every public host. Every public host when omitted; nothing when empty.
 - [`denyOutbound`](./reference/sandboxes#networkrules): Places it may never reach, written as in allowOutbound with no port: a deny wins over every allow.
@@ -26,19 +26,19 @@ try {
 }
 ```
 
-Traffic out of a sandbox costs $0.03 per GB. Traffic in is free.
+Outbound traffic from a machine costs $0.03 per GB. Inbound traffic is free.
 
 ## Connections in
 
 - HTTPS: a [preview](./web-app) shares one port at an HTTPS address, private by default.
-- TCP: [`POST /v2/ports`](./reference/ports#create-a-port) opens a public TCP port to a sandbox.
+- TCP: [`POST /v2/ports`](./reference/ports#create-a-port) opens a public TCP port to a machine.
 
-To call an API from a sandbox without giving it the key, use a [secret](./secrets).
+To call an API from a machine without giving it the key, use a [secret](./secrets).
 
 ## Give this to your agent
 
 Paste this into your coding agent:
 
-> Read https://withruntime.com/docs/networking.md. Give this project's sandboxes network rules that allow only the hosts its code needs, and confirm a connection to any other host is refused.
+> Read https://withruntime.com/docs/networking.md. Give this project's machines network rules that allow only the hosts its code needs, and confirm a connection to any other host is refused.
 >
 > This page as Markdown: https://withruntime.com/docs/networking.md

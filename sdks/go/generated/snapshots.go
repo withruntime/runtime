@@ -10,6 +10,14 @@ import (
 	"strconv"
 )
 
+// StoredUpdate A change to a snapshot, an image version or a volume: each field left out stays as it is.
+type StoredUpdate struct {
+	// DeleteAfterSeconds Seconds from now until Runtime deletes it, as its delete does: final, and it can't be undone. Sent again before then, it renews it; 0 takes its end off (kept until deleted). At least 0. At most 315360000.
+	DeleteAfterSeconds *int64 `json:"deleteAfterSeconds,omitempty"`
+	// DeleteProtection true refuses its delete (409 `delete_protected`) until an update sends false. Not while it has a `deleteAt`, unless the same update sends `deleteAfterSeconds` 0.
+	DeleteProtection *bool `json:"deleteProtection,omitempty"`
+}
+
 // SnapshotListQuery is what List takes in its query.
 type SnapshotListQuery struct {
 	// Name Only those of this name.
@@ -18,7 +26,7 @@ type SnapshotListQuery struct {
 	State *string
 	// Label Only those with every label given (repeat it for several): key:value, or a key for any value.
 	Label []string
-	// Sandbox Only those taken of this sandbox (or other machine), by its ID; a deleted one's snapshots too.
+	// Sandbox Only those taken of this machine, by its ID; a deleted one's snapshots too.
 	Sandbox *string
 	// Cursor Where the page starts: a page's `next`.
 	Cursor *string
@@ -49,7 +57,26 @@ func (q SnapshotListQuery) values() url.Values {
 	return v
 }
 
-// Snapshots A sandbox's memory and disk as they were, kept to start new sandboxes from.
+// SnapshotGetQuery is what Get takes in its query.
+type SnapshotGetQuery struct {
+	// Wait Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60.
+	Wait *float64
+	// IfState The state the caller last read, which `wait` waits for it to leave.
+	IfState *string
+}
+
+func (q SnapshotGetQuery) values() url.Values {
+	v := url.Values{}
+	if q.Wait != nil {
+		v.Set("wait", strconv.FormatFloat(*q.Wait, 'f', -1, 64))
+	}
+	if q.IfState != nil {
+		v.Set("ifState", *q.IfState)
+	}
+	return v
+}
+
+// Snapshots A machine's memory and disk as they were, kept to start new machines from.
 type Snapshots struct {
 	t *Transport
 }
@@ -63,21 +90,21 @@ func (c *Snapshots) List(ctx context.Context, q SnapshotListQuery, opts *Request
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Snapshots) ListAll(ctx context.Context, q SnapshotListQuery, opts *RequestOptions) iter.Seq2[Stored, error] {
-	return all(func(cursor *string) (*Page[Stored], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Stored], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
 }
 
 // Get Returns a snapshot.
-func (c *Snapshots) Get(ctx context.Context, id string, opts *RequestOptions) (*Stored, error) {
+func (c *Snapshots) Get(ctx context.Context, id string, q SnapshotGetQuery, opts *RequestOptions) (*Snapshot, error) {
 	out := new(Stored)
-	if err := c.t.Do(ctx, "GET", "/v2/snapshots/"+url.PathEscape(id), nil, nil, Call{Idempotent: true}, opts, out); err != nil {
+	if err := c.t.Do(ctx, "GET", "/v2/snapshots/"+url.PathEscape(id), q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return newSnapshot(c, out), nil
 }
 
 // Delete Deletes a snapshot, its memory and its disk.
@@ -87,4 +114,60 @@ func (c *Snapshots) Delete(ctx context.Context, id string, opts *RequestOptions)
 		return nil, err
 	}
 	return out, nil
+}
+
+// Update Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+func (c *Snapshots) Update(ctx context.Context, id string, in StoredUpdate, opts *RequestOptions) (*Stored, error) {
+	out := new(Stored)
+	if err := c.t.Do(ctx, "POST", "/v2/snapshots/"+url.PathEscape(id)+":update", nil, in, Call{Idempotent: true}, opts, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Snapshot is one of snapshots: A machine's memory and disk as they were, kept to start new machines from.
+type Snapshot struct {
+	c *Snapshots
+	// Info is what it was when last read.
+	Info *Stored
+}
+
+func newSnapshot(c *Snapshots, info *Stored) *Snapshot {
+	return &Snapshot{c: c, Info: info}
+}
+
+// ID is its id.
+func (s *Snapshot) ID() string { return s.Info.ID }
+
+// Refresh Returns a snapshot.
+func (s *Snapshot) Refresh(ctx context.Context, q *SnapshotGetQuery, opts *RequestOptions) error {
+	var qb SnapshotGetQuery
+	if q != nil {
+		qb = *q
+	}
+	got, err := s.c.Get(ctx, s.Info.ID, qb, opts)
+	if err != nil {
+		return err
+	}
+	s.Info = got.Info
+	return nil
+}
+
+// Delete Deletes a snapshot, its memory and its disk.
+func (s *Snapshot) Delete(ctx context.Context, opts *RequestOptions) (*Stored, error) {
+	return s.c.Delete(ctx, s.Info.ID, opts)
+}
+
+// Update Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+func (s *Snapshot) Update(ctx context.Context, in *StoredUpdate, opts *RequestOptions) error {
+	var b StoredUpdate
+	if in != nil {
+		b = *in
+	}
+	got, err := s.c.Update(ctx, s.Info.ID, b, opts)
+	if err != nil {
+		return err
+	}
+	s.Info = got
+	return nil
 }

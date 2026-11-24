@@ -64,6 +64,6 @@ try {
 
 Paste this into your coding agent:
 
-> Read https://withruntime.com/docs/commands.md. In this project, run short commands with exec and servers or interactive programs as processes, and make sure every process is stopped or its sandbox deleted when the work ends.
+> Read https://withruntime.com/docs/commands.md. In this project, run short commands with exec and servers or interactive programs as processes, and make sure every process is stopped or its machine deleted when the work ends.
 >
 > This page as Markdown: https://withruntime.com/docs/commands.md

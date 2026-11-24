@@ -14,7 +14,7 @@ export interface TunnelPeer {
   publicKey: string;
   /** Its address in the tunnel's subnet. */
   address: string;
-  /** The org's own ranges behind it that sandboxes may reach. */
+  /** The org's own ranges behind it that machines may reach. */
   routes: string[];
   /** When it was added. */
   createdAt: string;
@@ -22,9 +22,9 @@ export interface TunnelPeer {
   rotatedAt?: string;
 }
 
-/** A sandbox's address in a tunnel's subnet. */
+/** A machine's address in a tunnel's subnet. */
 export interface TunnelMember {
-  /** The sandbox. */
+  /** The machine. */
   sandboxId: string;
   /** Its address in the subnet. */
   address: string;
@@ -44,11 +44,11 @@ export interface TunnelSettings {
   rate: string;
   /** The org's machines and routers on it. */
   peers: TunnelPeer[];
-  /** Each sandbox's address in the subnet. */
+  /** Each machine's address in the subnet. */
   members: TunnelMember[];
 }
 
-/** A WireGuard tunnel from the org's own network into its sandboxes. */
+/** A WireGuard tunnel from the org's own network into its machines. */
 export interface Tunnel extends TunnelSettings {
   /** Its ID. */
   id: string;
@@ -68,15 +68,15 @@ export type TunnelListQuery = {
   limit?: number;
 };
 
-/** A WireGuard tunnel from your own network into your sandboxes. */
+/** A WireGuard tunnel from your own network into your machines. */
 export class Tunnels {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the org's WireGuard tunnels. */
-  list(query: TunnelListQuery = {}, options?: RequestOptions): Paginated<Tunnel> {
-    return new Paginated<Tunnel>((cursor) => this.#t.request<Page<Tunnel>>("GET", `/v2/tunnels`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: TunnelListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Tunnel> {
+    return new Paginated<Tunnel>((cursor) => this.transport.request<Page<Tunnel>>("GET", `/v2/tunnels`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 }

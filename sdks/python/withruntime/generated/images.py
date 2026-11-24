@@ -13,6 +13,7 @@ from ._runtime import (AsyncPage, AsyncStream, AsyncTransport, Page, Stream, Tra
                        to_bytes)
 from .sandboxes import Stored
 from .sandboxes import MachineStart
+from .snapshots import StoredUpdate
 
 
 @dataclass
@@ -243,11 +244,11 @@ class ImageContext:
 class ImageBuild:
     """What an image's build runs on: a machine of its own, deleted once the build ends."""
 
-    #: Its vCPUs. At least 1. At most 8. Default: 2.
+    #: Its vCPUs; a build machine's default when omitted. At least 1. At most 8.
     vcpu: Optional[int] = None
-    #: Its memory in GB. At least 1. At most 16. Default: 4.
+    #: Its memory in GB; a build machine's default when omitted. At least 1. At most 16.
     memory_gb: Optional[float] = None
-    #: Its disk in GB: the base image, the earlier stages and the context. At least 4. At most 32. Default: 16.
+    #: Its disk in GB: the base image, the earlier stages and the context. A build machine's default when omitted, at least its image's size. At least 4. At most 32.
     disk_gb: Optional[float] = None
     #: Seconds the build may run before it fails. At least 60. At most 3600. Default: 1800.
     timeout_seconds: Optional[int] = None
@@ -280,8 +281,10 @@ class ImageCreate:
     labels: Optional[Dict[str, str]] = None
     #: Tags its name takes for it once it is ready; `latest` when it has a name and none is given. At most 16 items.
     tags: Optional[List[str]] = None
-    #: An OCI image to use as it is, from a public registry: `python:3.12-slim`, `ghcr.io/org/app:1`.
+    #: An OCI image to use as it is: `python:3.12-slim`, `ghcr.io/org/app:1`. A private one is named by its digest, `repo@sha256:<64 hex digits>`, with `pullSecret`.
     image: Optional[str] = None
+    #: The secret holding the registry login that pulls a private `image`: a hidden secret with header `Authorization`, format `Basic {value}`, its value the base64 of `username:token`, as its hosts the registry's token service (`auth.docker.io` for Docker Hub, the registry's own name for `ghcr.io`, `quay.io` and others), and as its scope `{"none": true}`, so no machine's requests carry it. Runtime's egress proxy signs in with it for this import's build machine alone, which never holds the login or a token. The caller needs the `secrets:use` permission.
+    pull_secret: Optional[str] = None
     #: A Dockerfile: multi-stage builds, `ARG`, `COPY --from`, heredocs. `COPY` reads `files`.
     dockerfile: Optional[str] = None
     #: Packages, files and commands, rendered into a Dockerfile. Not with `files` or `context`.
@@ -302,6 +305,10 @@ class ImageCreate:
     start: Optional["MachineStart"] = None
     #: What its build runs on.
     build: Optional["ImageBuild"] = None
+    #: Seconds until Runtime deletes this version, as its delete does: final, and it can't be undone; one an App boots is deleted once none does. 0 or omitted: kept until deleted. At least 0. At most 315360000.
+    delete_after_seconds: Optional[int] = None
+    #: Whether this version's delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`.
+    delete_protection: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ImageCreate":
@@ -310,6 +317,7 @@ class ImageCreate:
             labels=d.get("labels"),
             tags=d["tags"] if d.get("tags") is not None else None,
             image=d.get("image"),
+            pull_secret=d.get("pullSecret"),
             dockerfile=d.get("dockerfile"),
             recipe=ImageRecipe.from_dict(d["recipe"]) if d.get("recipe") is not None else None,
             files=[ImageFile.from_dict(i) for i in d["files"]] if d.get("files") is not None else None,
@@ -320,6 +328,8 @@ class ImageCreate:
             env=d.get("env"),
             start=MachineStart.from_dict(d["start"]) if d.get("start") is not None else None,
             build=ImageBuild.from_dict(d["build"]) if d.get("build") is not None else None,
+            delete_after_seconds=d.get("deleteAfterSeconds"),
+            delete_protection=d.get("deleteProtection"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -328,6 +338,7 @@ class ImageCreate:
             "labels": self.labels,
             "tags": self.tags,
             "image": self.image,
+            "pullSecret": self.pull_secret,
             "dockerfile": self.dockerfile,
             "recipe": self.recipe,
             "files": self.files,
@@ -338,6 +349,8 @@ class ImageCreate:
             "env": self.env,
             "start": self.start,
             "build": self.build,
+            "deleteAfterSeconds": self.delete_after_seconds,
+            "deleteProtection": self.delete_protection,
         })
 
 
@@ -420,21 +433,119 @@ class Image:
         """Its id."""
         return self.info.id
 
+    @property
+    def object(self) -> Literal["snapshot", "image", "volume", "unknown"]:
+        """Its kind: `snapshot`, `image` or `volume`."""
+        return self.info.object
+
+    @property
+    def name(self) -> Optional[str]:
+        """Its name, unique in its project among its kind."""
+        return self.info.name
+
+    @property
+    def state(self) -> Literal["making", "ready", "failed", "deleted", "unknown"]:
+        """Where it is."""
+        return self.info.state
+
+    @property
+    def labels(self) -> Dict[str, str]:
+        """Its labels."""
+        return self.info.labels
+
+    @property
+    def size_bytes(self) -> int:
+        """What it was made to hold, in bytes."""
+        return self.info.size_bytes
+
+    @property
+    def stored_bytes(self) -> int:
+        """What it holds now, in bytes."""
+        return self.info.stored_bytes
+
+    @property
+    def parent_id(self) -> Optional[str]:
+        """What it was made from (a snapshot's machine, an image's base), if anything."""
+        return self.info.parent_id
+
+    @property
+    def attached_to(self) -> Optional[str]:
+        """The machine it is attached to now, if any."""
+        return self.info.attached_to
+
+    @property
+    def created_at(self) -> Optional[str]:
+        """When it was made."""
+        return self.info.created_at
+
+    @property
+    def version(self) -> Optional[int]:
+        """An image's version of its name: each build or keep of a name is its next."""
+        return self.info.version
+
+    @property
+    def tags(self) -> Optional[List[str]]:
+        """An image's tags, each `name:tag`."""
+        return self.info.tags
+
+    @property
+    def error(self) -> Optional[str]:
+        """Why an image's build failed."""
+        return self.info.error
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer, its state `deleted`."""
+        return self.info.deleted_at
+
+    @property
+    def delete_at(self) -> Optional[str]:
+        """When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted."""
+        return self.info.delete_at
+
+    @property
+    def delete_waits_for(self) -> Optional[str]:
+        """Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does."""
+        return self.info.delete_waits_for
+
+    @property
+    def delete_protection(self) -> Optional[bool]:
+        """Whether its delete is refused (409 `delete_protected`) until an update turns this off."""
+        return self.info.delete_protection
+
     def __repr__(self) -> str:
         return f"Image({self.info!r})"
 
-    def refresh(self) -> "Image":
+    @classmethod
+    def create(cls, *, api_key: Optional[str] = None, base_url: Optional[str] = None, project: Optional[str] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, tags: Optional[List[str]] = None, image: Optional[str] = None, pull_secret: Optional[str] = None, dockerfile: Optional[str] = None, recipe: Optional["ImageRecipe"] = None, files: Optional[List["ImageFile"]] = None, context: Optional["ImageContext"] = None, dockerignore: Optional[str] = None, target: Optional[str] = None, build_args: Optional[Dict[str, str]] = None, env: Optional[Dict[str, str]] = None, start: Optional["MachineStart"] = None, build: Optional["ImageBuild"] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "Image":
+        """Makes one and returns it, as ``Runtime().images.create()`` does, with a client of its own: ``RUNTIME_API_KEY``,
+        or ``api_key``. The other arguments are the create's."""
+        return Images(Transport(api_key=api_key, base_url=base_url, project=project)).create(name=name, labels=labels, tags=tags, image=image, pull_secret=pull_secret, dockerfile=dockerfile, recipe=recipe, files=files, context=context, dockerignore=dockerignore, target=target, build_args=build_args, env=env, start=start, build=build, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
+
+    def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "Image":
         """Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`)."""
-        self.info = (self._c.get(self.id)).info
+        self.info = (self._c.get(self.id, wait=wait, if_state=if_state)).info
         return self
 
     def delete(self, *, idempotency_key: Optional[str] = None) -> Stored:
-        """Deletes an image version. Sandboxes already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App."""
+        """Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App."""
         return self._c.delete(self.id, idempotency_key=idempotency_key)
 
     def logs(self, *, after: Optional[int] = None, limit: Optional[int] = None, follow: Optional[bool] = None) -> ImageLogs:
         """Returns an image's build log after a line, as the build writes it and once it has ended."""
         return self._c.logs(self.id, after=after, limit=limit, follow=follow)
+
+    def update(self, *, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "Image":
+        """Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is."""
+        self.info = self._c.update(self.id, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
+        return self
+
+    def __enter__(self) -> "Image":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        """Deletes it when the ``with`` block that holds it ends."""
+        self.delete()
 
 
 class Images:
@@ -443,9 +554,9 @@ class Images:
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
 
-    def get(self, id: str) -> Image:
+    def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> Image:
         """Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`)."""
-        return Image(self, Stored.from_dict(self._transport.request("GET", f"/v2/images/{quote(id, safe='')}", idempotent=True)))
+        return Image(self, Stored.from_dict(self._transport.request("GET", f"/v2/images/{quote(id, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True)))
 
     def list(self, *, name: Optional[str] = None, state: Optional[str] = None, label: Optional[List[str]] = None, cursor: Optional[str] = None, limit: Optional[int] = None) -> Page[Stored]:
         """Lists the project's images, newest first."""
@@ -460,16 +571,20 @@ class Images:
         return ChunkStored.from_dict(self._transport.request("PUT", f"/v2/images/context/{quote(digest, safe='')}", data=to_bytes(data), idempotency_key=idempotency_key, idempotent=True))
 
     def delete(self, id: str, *, idempotency_key: Optional[str] = None) -> Stored:
-        """Deletes an image version. Sandboxes already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App."""
+        """Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App."""
         return Stored.from_dict(self._transport.request("DELETE", f"/v2/images/{quote(id, safe='')}", idempotency_key=idempotency_key))
 
-    def create(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, tags: Optional[List[str]] = None, image: Optional[str] = None, dockerfile: Optional[str] = None, recipe: Optional["ImageRecipe"] = None, files: Optional[List["ImageFile"]] = None, context: Optional["ImageContext"] = None, dockerignore: Optional[str] = None, target: Optional[str] = None, build_args: Optional[Dict[str, str]] = None, env: Optional[Dict[str, str]] = None, start: Optional["MachineStart"] = None, build: Optional["ImageBuild"] = None, idempotency_key: Optional[str] = None) -> Image:
+    def create(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, tags: Optional[List[str]] = None, image: Optional[str] = None, pull_secret: Optional[str] = None, dockerfile: Optional[str] = None, recipe: Optional["ImageRecipe"] = None, files: Optional[List["ImageFile"]] = None, context: Optional["ImageContext"] = None, dockerignore: Optional[str] = None, target: Optional[str] = None, build_args: Optional[Dict[str, str]] = None, env: Optional[Dict[str, str]] = None, start: Optional["MachineStart"] = None, build: Optional["ImageBuild"] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Image:
         """Builds an image from an OCI image or a Dockerfile on a machine of its own, and returns it at once, `making`: `ready` once built, else `failed` with `error`. Each build of a name is its next version. Asked again with the same Idempotency-Key, it returns the same one."""
-        return Image(self, Stored.from_dict(self._transport.request("POST", f"/v2/images", body=compact({"name": name, "labels": labels, "tags": tags, "image": image, "dockerfile": dockerfile, "recipe": recipe, "files": files, "context": context, "dockerignore": dockerignore, "target": target, "buildArgs": build_args, "env": env, "start": start, "build": build}), idempotency_key=idempotency_key, idempotent=True)))
+        return Image(self, Stored.from_dict(self._transport.request("POST", f"/v2/images", body=compact({"name": name, "labels": labels, "tags": tags, "image": image, "pullSecret": pull_secret, "dockerfile": dockerfile, "recipe": recipe, "files": files, "context": context, "dockerignore": dockerignore, "target": target, "buildArgs": build_args, "env": env, "start": start, "build": build, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True)))
 
     def logs(self, id: str, *, after: Optional[int] = None, limit: Optional[int] = None, follow: Optional[bool] = None) -> ImageLogs:
         """Returns an image's build log after a line, as the build writes it and once it has ended."""
         return ImageLogs.from_dict(self._transport.request("GET", f"/v2/images/{quote(id, safe='')}/logs", query={"after": after, "limit": limit, "follow": follow}, idempotent=True))
+
+    def update(self, id: str, *, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Stored:
+        """Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is."""
+        return Stored.from_dict(self._transport.request("POST", f"/v2/images/{quote(id, safe='')}:update", body=compact({"deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True))
 
 
 class AsyncImage:
@@ -485,21 +600,119 @@ class AsyncImage:
         """Its id."""
         return self.info.id
 
+    @property
+    def object(self) -> Literal["snapshot", "image", "volume", "unknown"]:
+        """Its kind: `snapshot`, `image` or `volume`."""
+        return self.info.object
+
+    @property
+    def name(self) -> Optional[str]:
+        """Its name, unique in its project among its kind."""
+        return self.info.name
+
+    @property
+    def state(self) -> Literal["making", "ready", "failed", "deleted", "unknown"]:
+        """Where it is."""
+        return self.info.state
+
+    @property
+    def labels(self) -> Dict[str, str]:
+        """Its labels."""
+        return self.info.labels
+
+    @property
+    def size_bytes(self) -> int:
+        """What it was made to hold, in bytes."""
+        return self.info.size_bytes
+
+    @property
+    def stored_bytes(self) -> int:
+        """What it holds now, in bytes."""
+        return self.info.stored_bytes
+
+    @property
+    def parent_id(self) -> Optional[str]:
+        """What it was made from (a snapshot's machine, an image's base), if anything."""
+        return self.info.parent_id
+
+    @property
+    def attached_to(self) -> Optional[str]:
+        """The machine it is attached to now, if any."""
+        return self.info.attached_to
+
+    @property
+    def created_at(self) -> Optional[str]:
+        """When it was made."""
+        return self.info.created_at
+
+    @property
+    def version(self) -> Optional[int]:
+        """An image's version of its name: each build or keep of a name is its next."""
+        return self.info.version
+
+    @property
+    def tags(self) -> Optional[List[str]]:
+        """An image's tags, each `name:tag`."""
+        return self.info.tags
+
+    @property
+    def error(self) -> Optional[str]:
+        """Why an image's build failed."""
+        return self.info.error
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer, its state `deleted`."""
+        return self.info.deleted_at
+
+    @property
+    def delete_at(self) -> Optional[str]:
+        """When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted."""
+        return self.info.delete_at
+
+    @property
+    def delete_waits_for(self) -> Optional[str]:
+        """Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does."""
+        return self.info.delete_waits_for
+
+    @property
+    def delete_protection(self) -> Optional[bool]:
+        """Whether its delete is refused (409 `delete_protected`) until an update turns this off."""
+        return self.info.delete_protection
+
     def __repr__(self) -> str:
         return f"AsyncImage({self.info!r})"
 
-    async def refresh(self) -> "AsyncImage":
+    @classmethod
+    async def create(cls, *, api_key: Optional[str] = None, base_url: Optional[str] = None, project: Optional[str] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, tags: Optional[List[str]] = None, image: Optional[str] = None, pull_secret: Optional[str] = None, dockerfile: Optional[str] = None, recipe: Optional["ImageRecipe"] = None, files: Optional[List["ImageFile"]] = None, context: Optional["ImageContext"] = None, dockerignore: Optional[str] = None, target: Optional[str] = None, build_args: Optional[Dict[str, str]] = None, env: Optional[Dict[str, str]] = None, start: Optional["MachineStart"] = None, build: Optional["ImageBuild"] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "AsyncImage":
+        """Makes one and returns it, as ``Runtime().images.create()`` does, with a client of its own: ``RUNTIME_API_KEY``,
+        or ``api_key``. The other arguments are the create's."""
+        return await AsyncImages(AsyncTransport(api_key=api_key, base_url=base_url, project=project)).create(name=name, labels=labels, tags=tags, image=image, pull_secret=pull_secret, dockerfile=dockerfile, recipe=recipe, files=files, context=context, dockerignore=dockerignore, target=target, build_args=build_args, env=env, start=start, build=build, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
+
+    async def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "AsyncImage":
         """Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`)."""
-        self.info = (await self._c.get(self.id)).info
+        self.info = (await self._c.get(self.id, wait=wait, if_state=if_state)).info
         return self
 
     async def delete(self, *, idempotency_key: Optional[str] = None) -> Stored:
-        """Deletes an image version. Sandboxes already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App."""
+        """Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App."""
         return await self._c.delete(self.id, idempotency_key=idempotency_key)
 
     async def logs(self, *, after: Optional[int] = None, limit: Optional[int] = None, follow: Optional[bool] = None) -> ImageLogs:
         """Returns an image's build log after a line, as the build writes it and once it has ended."""
         return await self._c.logs(self.id, after=after, limit=limit, follow=follow)
+
+    async def update(self, *, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "AsyncImage":
+        """Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is."""
+        self.info = await self._c.update(self.id, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
+        return self
+
+    async def __aenter__(self) -> "AsyncImage":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        """Deletes it when the ``async with`` block that holds it ends."""
+        await self.delete()
 
 
 class AsyncImages:
@@ -508,9 +721,9 @@ class AsyncImages:
     def __init__(self, transport: AsyncTransport) -> None:
         self._transport = transport
 
-    async def get(self, id: str) -> AsyncImage:
+    async def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> AsyncImage:
         """Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`)."""
-        return AsyncImage(self, Stored.from_dict(await self._transport.request("GET", f"/v2/images/{quote(id, safe='')}", idempotent=True)))
+        return AsyncImage(self, Stored.from_dict(await self._transport.request("GET", f"/v2/images/{quote(id, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True)))
 
     async def list(self, *, name: Optional[str] = None, state: Optional[str] = None, label: Optional[List[str]] = None, cursor: Optional[str] = None, limit: Optional[int] = None) -> AsyncPage[Stored]:
         """Lists the project's images, newest first."""
@@ -525,16 +738,20 @@ class AsyncImages:
         return ChunkStored.from_dict(await self._transport.request("PUT", f"/v2/images/context/{quote(digest, safe='')}", data=to_bytes(data), idempotency_key=idempotency_key, idempotent=True))
 
     async def delete(self, id: str, *, idempotency_key: Optional[str] = None) -> Stored:
-        """Deletes an image version. Sandboxes already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App."""
+        """Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App."""
         return Stored.from_dict(await self._transport.request("DELETE", f"/v2/images/{quote(id, safe='')}", idempotency_key=idempotency_key))
 
-    async def create(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, tags: Optional[List[str]] = None, image: Optional[str] = None, dockerfile: Optional[str] = None, recipe: Optional["ImageRecipe"] = None, files: Optional[List["ImageFile"]] = None, context: Optional["ImageContext"] = None, dockerignore: Optional[str] = None, target: Optional[str] = None, build_args: Optional[Dict[str, str]] = None, env: Optional[Dict[str, str]] = None, start: Optional["MachineStart"] = None, build: Optional["ImageBuild"] = None, idempotency_key: Optional[str] = None) -> AsyncImage:
+    async def create(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, tags: Optional[List[str]] = None, image: Optional[str] = None, pull_secret: Optional[str] = None, dockerfile: Optional[str] = None, recipe: Optional["ImageRecipe"] = None, files: Optional[List["ImageFile"]] = None, context: Optional["ImageContext"] = None, dockerignore: Optional[str] = None, target: Optional[str] = None, build_args: Optional[Dict[str, str]] = None, env: Optional[Dict[str, str]] = None, start: Optional["MachineStart"] = None, build: Optional["ImageBuild"] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> AsyncImage:
         """Builds an image from an OCI image or a Dockerfile on a machine of its own, and returns it at once, `making`: `ready` once built, else `failed` with `error`. Each build of a name is its next version. Asked again with the same Idempotency-Key, it returns the same one."""
-        return AsyncImage(self, Stored.from_dict(await self._transport.request("POST", f"/v2/images", body=compact({"name": name, "labels": labels, "tags": tags, "image": image, "dockerfile": dockerfile, "recipe": recipe, "files": files, "context": context, "dockerignore": dockerignore, "target": target, "buildArgs": build_args, "env": env, "start": start, "build": build}), idempotency_key=idempotency_key, idempotent=True)))
+        return AsyncImage(self, Stored.from_dict(await self._transport.request("POST", f"/v2/images", body=compact({"name": name, "labels": labels, "tags": tags, "image": image, "pullSecret": pull_secret, "dockerfile": dockerfile, "recipe": recipe, "files": files, "context": context, "dockerignore": dockerignore, "target": target, "buildArgs": build_args, "env": env, "start": start, "build": build, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True)))
 
     async def logs(self, id: str, *, after: Optional[int] = None, limit: Optional[int] = None, follow: Optional[bool] = None) -> ImageLogs:
         """Returns an image's build log after a line, as the build writes it and once it has ended."""
         return ImageLogs.from_dict(await self._transport.request("GET", f"/v2/images/{quote(id, safe='')}/logs", query={"after": after, "limit": limit, "follow": follow}, idempotent=True))
+
+    async def update(self, id: str, *, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Stored:
+        """Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is."""
+        return Stored.from_dict(await self._transport.request("POST", f"/v2/images/{quote(id, safe='')}:update", body=compact({"deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True))
 
 
 __all__ = ["ContextAsked", "ContextMissing", "ChunkStored", "ImageFile", "ImageRecipe", "ImageArchive", "ImageContextFile", "ImageContext", "ImageBuild", "ImageCreate", "ImageLogLine", "ImageLogs", "Images", "Image", "AsyncImages", "AsyncImage"]

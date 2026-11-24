@@ -59,8 +59,8 @@ result = runtime.job_runs.list(job="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.job_runs.list(job: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.job_runs.list(job: "example")
 ```
 
 ```bash title="CLI"
@@ -76,6 +76,13 @@ Returns a run.
 Its action, for a key's grant: `jobRuns:get`.
 
 Path: `id`.
+
+Query:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `wait` | number | No | Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. |
+| `ifState` | string | No | The state the caller last read, which `wait` waits for it to leave. |
 
 Returns a [JobRun](#jobrun).
 
@@ -105,8 +112,8 @@ result = runtime.job_runs.get("JOBRUN_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.job_runs.get("JOBRUN_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.job_runs.get("JOBRUN_ID")
 ```
 
 ```bash title="CLI"
@@ -158,8 +165,8 @@ result = runtime.job_runs.output("JOBRUN_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.job_runs.output("JOBRUN_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.job_runs.output("JOBRUN_ID")
 ```
 
 ```bash title="CLI"

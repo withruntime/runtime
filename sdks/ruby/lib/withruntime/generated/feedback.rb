@@ -5,92 +5,92 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # A report to send.
-    # - +kind+: `bug`, `missing_feature`, `competitor_gap` (something another provider does better), `migration_blocker` (what stops a move to Runtime), `docs`, `pricing`, `praise` or `other`.
-    # - +summary+: One line. At least 1 character. At most 200 characters.
-    # - +detail+: What happened, what you expected, how to reproduce. At most 8000 characters.
-    # - +competitor+: The other provider, for a gap or a migration (E2B, Daytona, Modal). At most 80 characters.
-    # - +resource_id+: The resource it is about. At most 64 characters.
-    # - +request_id+: The requestId of the error you are reporting. At most 64 characters.
-    # - +page+: The page it is about, for a report from the site. At most 300 characters.
-    # - +rating+: A page's rating: 1 helpful, -1 not. At least -1. At most 1.
-    # - +contact_email+: An address to reply to, for a report from someone not signed in. At most 254 characters.
-    # - +context+: Anything else useful, at most 16 entries of text.
-    FeedbackCreate = Struct.new(:kind, :summary, :detail, :competitor, :resource_id, :request_id, :page, :rating, :contact_email, :context, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A report to send.
+  # - +kind+: `bug`, `missing_feature`, `competitor_gap` (something another provider does better), `migration_blocker` (what stops a move to Runtime), `docs`, `pricing`, `praise` or `other`.
+  # - +summary+: One line. At least 1 character. At most 200 characters.
+  # - +detail+: What happened, what you expected, how to reproduce. At most 8000 characters.
+  # - +competitor+: The other provider, for a gap or a migration (E2B, Daytona, Modal). At most 80 characters.
+  # - +resource_id+: The resource it is about. At most 64 characters.
+  # - +request_id+: The requestId of the error you are reporting. At most 64 characters.
+  # - +page+: The page it is about, for a report from the site. At most 300 characters.
+  # - +rating+: A page's rating: 1 helpful, -1 not. At least -1. At most 1.
+  # - +contact_email+: An address to reply to, for a report from someone not signed in. At most 254 characters.
+  # - +context+: Anything else useful, at most 16 entries of text.
+  FeedbackCreate = Struct.new(:kind, :summary, :detail, :competitor, :resource_id, :request_id, :page, :rating, :contact_email, :context, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          kind: h["kind"],
-          summary: h["summary"],
-          detail: h["detail"],
-          competitor: h["competitor"],
-          resource_id: h["resourceId"],
-          request_id: h["requestId"],
-          page: h["page"],
-          rating: h["rating"],
-          contact_email: h["contactEmail"],
-          context: h["context"],
-        )
-      end
-
-      def to_wire
-        {
-          "kind" => self.kind,
-          "summary" => self.summary,
-          "detail" => self.detail,
-          "competitor" => self.competitor,
-          "resourceId" => self.resource_id,
-          "requestId" => self.request_id,
-          "page" => self.page,
-          "rating" => self.rating,
-          "contactEmail" => self.contact_email,
-          "context" => self.context,
-        }.compact
-      end
+      new(
+        kind: h["kind"],
+        summary: h["summary"],
+        detail: h["detail"],
+        competitor: h["competitor"],
+        resource_id: h["resourceId"],
+        request_id: h["requestId"],
+        page: h["page"],
+        rating: h["rating"],
+        contact_email: h["contactEmail"],
+        context: h["context"],
+      )
     end
 
-    # A report as it was received.
-    # - +id+: Its ID.
-    # - +object+: Always `feedback`.
-    # - +kind+: What it is about.
-    # - +summary+: Its one line.
-    # - +created_at+: When it was received.
-    Feedback = Struct.new(:id, :object, :kind, :summary, :created_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "kind" => self.kind,
+        "summary" => self.summary,
+        "detail" => self.detail,
+        "competitor" => self.competitor,
+        "resourceId" => self.resource_id,
+        "requestId" => self.request_id,
+        "page" => self.page,
+        "rating" => self.rating,
+        "contactEmail" => self.contact_email,
+        "context" => self.context,
+      }.compact
+    end
+  end
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          kind: h["kind"],
-          summary: h["summary"],
-          created_at: h["createdAt"],
-        )
-      end
+  # A report as it was received.
+  # - +id+: Its ID.
+  # - +object+: Always `feedback`.
+  # - +kind+: What it is about.
+  # - +summary+: Its one line.
+  # - +created_at+: When it was received.
+  Feedback = Struct.new(:id, :object, :kind, :summary, :created_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "kind" => self.kind,
-          "summary" => self.summary,
-          "createdAt" => self.created_at,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        object: h["object"],
+        kind: h["kind"],
+        summary: h["summary"],
+        created_at: h["createdAt"],
+      )
     end
 
-    # A report to Runtime's team: a bug, a missing feature, a gap against another provider, a migration blocker, unclear docs, a price, or praise. Every report is read.
-    class FeedbackClient
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "id" => self.id,
+        "object" => self.object,
+        "kind" => self.kind,
+        "summary" => self.summary,
+        "createdAt" => self.created_at,
+      }.compact
+    end
+  end
 
-      # Sends a report to Runtime's team. Quote the requestId of an error you hit; never send credentials, private files or user data.
-      def create(kind:, summary:, detail: nil, competitor: nil, resource_id: nil, request_id: nil, page: nil, rating: nil, contact_email: nil, context: nil, idempotency_key: nil)
-        Feedback.from(@transport.request("POST", "/v2/feedback", body: { "kind" => kind, "summary" => summary, "detail" => detail, "competitor" => competitor, "resourceId" => resource_id, "requestId" => request_id, "page" => page, "rating" => rating, "contactEmail" => contact_email, "context" => context }.compact, idempotency_key: idempotency_key))
-      end
+  # A report to Runtime's team: a bug, a missing feature, a gap against another provider, a migration blocker, unclear docs, a price, or praise. Every report is read.
+  class FeedbackClient
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Sends a report to Runtime's team. Quote the requestId of an error you hit; never send credentials, private files or user data.
+    def create(kind:, summary:, detail: nil, competitor: nil, resource_id: nil, request_id: nil, page: nil, rating: nil, contact_email: nil, context: nil, idempotency_key: nil)
+      Feedback.from(@transport.request("POST", "/v2/feedback", body: { "kind" => kind, "summary" => summary, "detail" => detail, "competitor" => competitor, "resourceId" => resource_id, "requestId" => request_id, "page" => page, "rating" => rating, "contactEmail" => contact_email, "context" => context }.compact, idempotency_key: idempotency_key))
     end
   end
 end

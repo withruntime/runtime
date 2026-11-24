@@ -12,7 +12,7 @@ export interface EgressIpSettings {
   rate: string;
 }
 
-/** A static egress IP: every sandbox of the org sends from it. */
+/** A static egress IP: every machine of the org sends from it. */
 export interface EgressIp extends EgressIpSettings {
   /** Its ID. */
   id: string;
@@ -20,9 +20,9 @@ export interface EgressIp extends EgressIpSettings {
   object: "ip" | (string & {});
   /** The address. */
   address: string;
-  /** Its state: `ready` once sandboxes send from it. */
+  /** Its state: `ready` once machines send from it. */
   state: "making" | "ready" | "deleted" | (string & {});
-  /** Turned off: its sandboxes send from the shared addresses. */
+  /** Turned off: its machines send from the shared addresses. */
   disabled: boolean;
   /** When it was reserved. */
   createdAt: string;
@@ -34,15 +34,15 @@ export type EgressIpListQuery = {
   limit?: number;
 };
 
-/** A static egress IP: a public address every sandbox of the org sends from, the same every time, for others' allow-lists. */
+/** A static egress IP: a public address every machine of the org sends from, the same every time, for others' allow-lists. */
 export class EgressIps {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the org's static egress IPs. */
-  list(query: EgressIpListQuery = {}, options?: RequestOptions): Paginated<EgressIp> {
-    return new Paginated<EgressIp>((cursor) => this.#t.request<Page<EgressIp>>("GET", `/v2/egress-ips`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: EgressIpListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<EgressIp> {
+    return new Paginated<EgressIp>((cursor) => this.transport.request<Page<EgressIp>>("GET", `/v2/egress-ips`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 }

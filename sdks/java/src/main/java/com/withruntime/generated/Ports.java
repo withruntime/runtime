@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** A public TCP port carried to a port of a sandbox: a database, a game server, anything that is not HTTP. */
+/** A public TCP port carried to a port of a machine: a database, a game server, anything that is not HTTP. */
 public final class Ports {
   private final Transport t;
 
@@ -17,10 +17,10 @@ public final class Ports {
 
   /** A public TCP port to open. */
   public static final class PortCreate {
-    /** The sandbox to carry to. */
+    /** The machine to carry to. */
     public String sandboxId;
 
-    /** The port inside the sandbox, 1 to 65535. */
+    /** The port inside the machine, 1 to 65535. */
     public Long port;
 
     public PortCreate sandboxId(String v) {
@@ -51,7 +51,7 @@ public final class Ports {
 
   /** A public TCP port's settings, as it keeps them. */
   public static final class PortSettings {
-    /** The port inside the sandbox. At least 1. At most 65535. */
+    /** The port inside the machine. At least 1. At most 65535. */
     public Long port;
 
     public PortSettings port(Long v) {
@@ -73,9 +73,9 @@ public final class Ports {
     }
   }
 
-  /** A public TCP port: raw TCP from a public address and port to a port of a sandbox. */
+  /** A public TCP port: raw TCP from a public address and port to a port of a machine. */
   public static final class Port {
-    /** The port inside the sandbox. At least 1. At most 65535. */
+    /** The port inside the machine. At least 1. At most 65535. */
     public Long port;
 
     /** Its ID. */
@@ -93,7 +93,7 @@ public final class Ports {
     /** The public port to connect to. */
     public Long publicPort;
 
-    /** The sandbox it carries to. */
+    /** The machine it carries to. */
     public String sandboxId;
 
     /** Its state: `ready` once every edge carries it. */
@@ -199,7 +199,7 @@ public final class Ports {
 
   /** What list takes in its query. */
   public static final class PortListQuery {
-    /** Only this sandbox's ports. */
+    /** Only this machine's ports. */
     public String sandboxId;
 
     /** Where the page starts: a page's `next`. */
@@ -232,12 +232,12 @@ public final class Ports {
     }
   }
 
-  /** Opens a public TCP port to a port of a sandbox: raw TCP, carried as it is. The public port is assigned from a pool of 10,000; returns 409 when every one is in use. Asked again for the same sandbox and port, it returns the same public port. */
+  /** Opens a public TCP port to a port of a machine: raw TCP, carried as it is. The public port is assigned from a pool of 10,000; returns 409 when every one is in use. Asked again for the same machine and port, it returns the same public port. */
   public Port create(PortCreate input, Transport.RequestOptions opts) {
     return Port.of(t.request("POST", "/v2/ports", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
-  /** Lists the org's public TCP ports, or one sandbox's, by `connect`. */
+  /** Lists the org's public TCP ports, or one machine's, by `connect`. */
   public Page<Port> list(PortListQuery query, Transport.RequestOptions opts) {
     return Page.of(t.request("GET", "/v2/ports", query == null ? null : query.query(), null, new Transport.Call(true, null), opts), Port::of);
   }

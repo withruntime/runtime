@@ -12,19 +12,19 @@ import (
 
 // PortCreate A public TCP port to open.
 type PortCreate struct {
-	// SandboxID The sandbox to carry to.
+	// SandboxID The machine to carry to.
 	SandboxID string `json:"sandboxId"`
-	// Port The port inside the sandbox, 1 to 65535.
+	// Port The port inside the machine, 1 to 65535.
 	Port int64 `json:"port"`
 }
 
 // PortSettings A public TCP port's settings, as it keeps them.
 type PortSettings struct {
-	// Port The port inside the sandbox. At least 1. At most 65535.
+	// Port The port inside the machine. At least 1. At most 65535.
 	Port int64 `json:"port"`
 }
 
-// Port A public TCP port: raw TCP from a public address and port to a port of a sandbox.
+// Port A public TCP port: raw TCP from a public address and port to a port of a machine.
 type Port struct {
 	PortSettings
 	// ID Its ID.
@@ -37,7 +37,7 @@ type Port struct {
 	Address string `json:"address"`
 	// PublicPort The public port to connect to.
 	PublicPort int64 `json:"publicPort"`
-	// SandboxID The sandbox it carries to.
+	// SandboxID The machine it carries to.
 	SandboxID string `json:"sandboxId"`
 	// State Its state: `ready` once every edge carries it.
 	State string `json:"state"`
@@ -51,7 +51,7 @@ type Port struct {
 
 // PortListQuery is what List takes in its query.
 type PortListQuery struct {
-	// SandboxID Only this sandbox's ports.
+	// SandboxID Only this machine's ports.
 	SandboxID *string
 	// Cursor Where the page starts: a page's `next`.
 	Cursor *string
@@ -73,12 +73,12 @@ func (q PortListQuery) values() url.Values {
 	return v
 }
 
-// Ports A public TCP port carried to a port of a sandbox: a database, a game server, anything that is not HTTP.
+// Ports A public TCP port carried to a port of a machine: a database, a game server, anything that is not HTTP.
 type Ports struct {
 	t *Transport
 }
 
-// Create Opens a public TCP port to a port of a sandbox: raw TCP, carried as it is. The public port is assigned from a pool of 10,000; returns 409 when every one is in use. Asked again for the same sandbox and port, it returns the same public port.
+// Create Opens a public TCP port to a port of a machine: raw TCP, carried as it is. The public port is assigned from a pool of 10,000; returns 409 when every one is in use. Asked again for the same machine and port, it returns the same public port.
 func (c *Ports) Create(ctx context.Context, in PortCreate, opts *RequestOptions) (*Port, error) {
 	out := new(Port)
 	if err := c.t.Do(ctx, "POST", "/v2/ports", nil, in, Call{Idempotent: true}, opts, out); err != nil {
@@ -87,7 +87,7 @@ func (c *Ports) Create(ctx context.Context, in PortCreate, opts *RequestOptions)
 	return out, nil
 }
 
-// List Lists the org's public TCP ports, or one sandbox's, by `connect`.
+// List Lists the org's public TCP ports, or one machine's, by `connect`.
 func (c *Ports) List(ctx context.Context, q PortListQuery, opts *RequestOptions) (*Page[Port], error) {
 	out := new(Page[Port])
 	if err := c.t.Do(ctx, "GET", "/v2/ports", q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
@@ -96,9 +96,9 @@ func (c *Ports) List(ctx context.Context, q PortListQuery, opts *RequestOptions)
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Ports) ListAll(ctx context.Context, q PortListQuery, opts *RequestOptions) iter.Seq2[Port, error] {
-	return all(func(cursor *string) (*Page[Port], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Port], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

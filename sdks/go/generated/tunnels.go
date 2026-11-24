@@ -20,7 +20,7 @@ type TunnelPeer struct {
 	PublicKey string `json:"publicKey"`
 	// Address Its address in the tunnel's subnet.
 	Address string `json:"address"`
-	// Routes The org's own ranges behind it that sandboxes may reach.
+	// Routes The org's own ranges behind it that machines may reach.
 	Routes []string `json:"routes"`
 	// CreatedAt When it was added.
 	CreatedAt string `json:"createdAt"`
@@ -28,9 +28,9 @@ type TunnelPeer struct {
 	RotatedAt *string `json:"rotatedAt,omitempty"`
 }
 
-// TunnelMember A sandbox's address in a tunnel's subnet.
+// TunnelMember A machine's address in a tunnel's subnet.
 type TunnelMember struct {
-	// SandboxID The sandbox.
+	// SandboxID The machine.
 	SandboxID string `json:"sandboxId"`
 	// Address Its address in the subnet.
 	Address string `json:"address"`
@@ -50,11 +50,11 @@ type TunnelSettings struct {
 	Rate string `json:"rate"`
 	// Peers The org's machines and routers on it.
 	Peers []TunnelPeer `json:"peers"`
-	// Members Each sandbox's address in the subnet.
+	// Members Each machine's address in the subnet.
 	Members []TunnelMember `json:"members"`
 }
 
-// Tunnel A WireGuard tunnel from the org's own network into its sandboxes.
+// Tunnel A WireGuard tunnel from the org's own network into its machines.
 type Tunnel struct {
 	TunnelSettings
 	// ID Its ID.
@@ -88,7 +88,7 @@ func (q TunnelListQuery) values() url.Values {
 	return v
 }
 
-// Tunnels A WireGuard tunnel from your own network into your sandboxes.
+// Tunnels A WireGuard tunnel from your own network into your machines.
 type Tunnels struct {
 	t *Transport
 }
@@ -102,9 +102,9 @@ func (c *Tunnels) List(ctx context.Context, q TunnelListQuery, opts *RequestOpti
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Tunnels) ListAll(ctx context.Context, q TunnelListQuery, opts *RequestOptions) iter.Seq2[Tunnel, error] {
-	return all(func(cursor *string) (*Page[Tunnel], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Tunnel], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

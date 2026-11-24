@@ -73,11 +73,11 @@ official MCP Registry as `com.withruntime/runtime`. Details:
 ## Documentation
 
 - [Start](https://withruntime.com/docs/start)
-- [TypeScript](https://withruntime.com/docs/javascript) and [Python](https://withruntime.com/docs/python)
-- [CLI](https://withruntime.com/docs/cli) and [MCP](https://withruntime.com/docs/mcp)
-- [Frameworks](https://withruntime.com/docs/frameworks), and moving from
-  [E2B](https://withruntime.com/docs/e2b-alternative) or
-  [Daytona](https://withruntime.com/docs/daytona-alternative)
+- [TypeScript](https://withruntime.com/docs/sdks) and [Python](https://withruntime.com/docs/sdks)
+- [CLI](https://withruntime.com/docs/sdks) and [MCP](https://withruntime.com/docs/mcp)
+- [Frameworks](https://withruntime.com/integrations), and moving from
+  [E2B](https://withruntime.com/compare/e2b-alternatives) or
+  [Daytona](https://withruntime.com/compare/daytona-alternatives)
 - [Pricing](https://withruntime.com/docs/pricing)
 
 ## How Runtime compares

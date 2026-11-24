@@ -52,8 +52,8 @@ result = runtime.webhooks.create(url="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.webhooks.create(url: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.webhooks.create(url: "example")
 ```
 
 ```bash title="CLI"
@@ -103,8 +103,8 @@ result = runtime.webhooks.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.webhooks.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.webhooks.list
 ```
 
 ```bash title="CLI"
@@ -147,8 +147,8 @@ result = runtime.webhooks.delete("WEBHOOK_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.webhooks.delete("WEBHOOK_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.webhooks.delete("WEBHOOK_ID")
 ```
 
 ```bash title="CLI"

@@ -56,8 +56,8 @@ result = runtime.audit.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.audit.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.audit.list
 ```
 
 ```bash title="CLI"

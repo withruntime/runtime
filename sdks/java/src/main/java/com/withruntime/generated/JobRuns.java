@@ -248,6 +248,32 @@ public final class JobRuns {
     }
   }
 
+  /** What get takes in its query. */
+  public static final class JobRunGetQuery {
+    /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+    public Double wait;
+
+    /** The state the caller last read, which `wait` waits for it to leave. */
+    public String ifState;
+
+    public JobRunGetQuery wait(Double v) {
+      this.wait = v;
+      return this;
+    }
+
+    public JobRunGetQuery ifState(String v) {
+      this.ifState = v;
+      return this;
+    }
+
+    Map<String, Object> query() {
+      Map<String, Object> q = new LinkedHashMap<>();
+      if (wait != null) q.put("wait", String.valueOf(wait));
+      if (ifState != null) q.put("ifState", String.valueOf(ifState));
+      return q;
+    }
+  }
+
   /** What output takes in its query. */
   public static final class JobRunOutputQuery {
     /** Output after this byte. At least 0. Default: 0. */
@@ -280,8 +306,8 @@ public final class JobRuns {
   }
 
   /** Returns a run. */
-  public JobRun get(String id, Transport.RequestOptions opts) {
-    return JobRun.of(t.request("GET", "/v2/job-runs/" + Transport.path(id), null, null, new Transport.Call(true, null), opts));
+  public JobRun get(String id, JobRunGetQuery query, Transport.RequestOptions opts) {
+    return JobRun.of(t.request("GET", "/v2/job-runs/" + Transport.path(id), query == null ? null : query.query(), null, new Transport.Call(true, null), opts));
   }
 
   /** Returns a run's output after a cursor, stdout and stderr together in the order written, and the cursor to read on from. Its last 256 KiB are kept; truncated says when the cursor fell before them. */

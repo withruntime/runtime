@@ -1,6 +1,6 @@
 # Quickstart
 
-Runtime runs Linux sandboxes: each one is a microVM with its own kernel, disk and network, created in milliseconds. This page creates a sandbox, runs a program in it and deletes it.
+Runtime runs Linux machines: each one is a microVM with its own kernel, disk and network, created in milliseconds. This page creates a sandbox, runs a program in it and deletes it.
 
 ## Before you begin
 
@@ -8,7 +8,7 @@ Runtime runs Linux sandboxes: each one is a microVM with its own kernel, disk an
 2. Set it as `RUNTIME_API_KEY` in your environment. Every SDK, the CLI and the MCP server read it from there.
 3. Install an SDK: `npm install withruntime` (Node.js 22.12 or later, or Bun) or `pip install withruntime` (Python 3.9 or later).
 
-Signing up takes no card. Your first sandbox asks for one, and the 7-day Pro trial with $5 of usage starts then. After the trial, Pro costs $25 a month, and that fee is returned as $25 of usage. See [pricing](./pricing).
+Signing up takes no card. Creating a sandbox needs one: until a card is added at [withruntime.com/account/start](https://withruntime.com/account/start), every call that creates or changes a sandbox answers `402` with the error code `card_required`. Adding the card starts the 7-day Pro trial with $5 of usage. After the trial, Pro costs $25 a month, and that fee is returned as $25 of usage. See [pricing](./pricing).
 
 ## Run a program
 

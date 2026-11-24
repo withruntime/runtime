@@ -6,15 +6,15 @@ Every SDK, the CLI and the MCP tools are generated from the same spec as the API
 | --- | --- | --- |
 | TypeScript and JavaScript | `npm install withruntime` | `new Runtime()` |
 | Python | `pip install withruntime` | `Runtime()` |
-| Ruby | `gem install withruntime` | `Withruntime::Generated::Kit.new` |
-| Go | `go get withruntime.com/go` | `generated.New(generated.Options{})` |
+| Ruby | `gem install withruntime` | `Withruntime::Runtime.new` |
+| Go | `go get withruntime.com/go/v2` | `generated.New(generated.Options{})`, from `withruntime.com/go/v2/generated` |
 | CLI | `npm install --global withruntime` | `runtime <product> <call>` |
 
 Each client reads `RUNTIME_API_KEY` and, when it is set, `RUNTIME_API_URL`. A call's method is named for it: [`POST /v2/sandboxes/{id}:exec`](./reference/sandboxes#exec) is `runtime.sandboxes.exec` in TypeScript, `runtime.sandboxes.exec` in Python and `runtime sandboxes exec` in the CLI.
 
 ## Retries and timeouts
 
-The SDKs retry the answers [errors and retries](./errors) lists, up to 3 times, with the same `Idempotency-Key`, so a retried create never makes a second sandbox.
+The SDKs retry the answers [errors and retries](./errors) lists, up to 3 times, with the same `Idempotency-Key`, so a retried create never makes a second machine.
 
 ## From an agent
 

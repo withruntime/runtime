@@ -17,18 +17,22 @@ from ._runtime import (AsyncPage, AsyncStream, AsyncTransport, Page, Stream, Tra
 class SecretScope:
     """Which machines may use a secret."""
 
-    #: Machines with every label of any one of these sets.
-    labels_any: List[Dict[str, str]]
+    #: Machines with every label of any one of these sets. Give this or `none`.
+    labels_any: Optional[List[Dict[str, str]]] = None
+    #: `true`: no machine. Runtime alone uses the secret: it is in no machine's requests or environment. A registry login an image import pulls with (`pullSecret`) has this scope. Give this or `labelsAny`.
+    none: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SecretScope":
         return cls(
-            labels_any=d["labelsAny"],
+            labels_any=d["labelsAny"] if d.get("labelsAny") is not None else None,
+            none=d.get("none"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
         return compact({
             "labelsAny": self.labels_any,
+            "none": self.none,
         })
 
 
@@ -325,12 +329,82 @@ class Secret:
         """Its name."""
         return self.info.name
 
+    @property
+    def visible(self) -> Optional[bool]:
+        """The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted."""
+        return self.info.visible
+
+    @property
+    def hosts(self) -> Optional[List[str]]:
+        """The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible."""
+        return self.info.hosts
+
+    @property
+    def header(self) -> Optional[str]:
+        """The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only."""
+        return self.info.header
+
+    @property
+    def format(self) -> Optional[str]:
+        """The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only."""
+        return self.info.format
+
+    @property
+    def env_name(self) -> Optional[str]:
+        """The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name."""
+        return self.info.env_name
+
+    @property
+    def scope(self) -> Optional["SecretScope"]:
+        """The machines that may use it; every machine of the organization when omitted."""
+        return self.info.scope
+
+    @property
+    def policies(self) -> Optional["SecretPolicies"]:
+        """How it may be used. Hidden secrets only."""
+        return self.info.policies
+
+    @property
+    def object(self) -> Literal["secret", "unknown"]:
+        """Always `secret`."""
+        return self.info.object
+
+    @property
+    def state(self) -> Literal["active", "deleted", "unknown"]:
+        """`active` while requests carry it; `deleted` once deleted: a delete's answer."""
+        return self.info.state
+
+    @property
+    def placeholder(self) -> Optional[str]:
+        """What a machine holds in the value's place; none when visible."""
+        return self.info.placeholder
+
+    @property
+    def version(self) -> int:
+        """Raised by each change."""
+        return self.info.version
+
+    @property
+    def value_bytes(self) -> Optional[int]:
+        """Its value's length in bytes."""
+        return self.info.value_bytes
+
+    @property
+    def updated_at(self) -> Optional[str]:
+        """When it was last changed."""
+        return self.info.updated_at
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer, its state `deleted`."""
+        return self.info.deleted_at
+
     def __repr__(self) -> str:
         return f"Secret({self.info!r})"
 
-    def refresh(self) -> "Secret":
+    def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "Secret":
         """Returns a secret, without its value."""
-        self.info = (self._c.get(self.name)).info
+        self.info = (self._c.get(self.name, wait=wait, if_state=if_state)).info
         return self
 
     def set(self, *, visible: Optional[bool] = None, hosts: Optional[List[str]] = None, header: Optional[str] = None, format: Optional[str] = None, env_name: Optional[str] = None, scope: Optional["SecretScope"] = None, policies: Optional["SecretPolicies"] = None, value: Optional[str] = None, expected_version: Optional[int] = None, idempotency_key: Optional[str] = None) -> "Secret":
@@ -341,6 +415,13 @@ class Secret:
     def delete(self, *, idempotency_key: Optional[str] = None) -> SecretInfo:
         """Deletes a secret and its value: no request carries it from then on, open connections' included, and a visible secret's file is removed from every machine within a second. Deleted again, it returns the same deleted secret."""
         return self._c.delete(self.name, idempotency_key=idempotency_key)
+
+    def __enter__(self) -> "Secret":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        """Deletes it when the ``with`` block that holds it ends."""
+        self.delete()
 
 
 class Secrets:
@@ -353,9 +434,9 @@ class Secrets:
         """Lists the organization's secrets by name, without their values."""
         return page(self._transport.request("GET", f"/v2/secrets", query={"cursor": cursor, "limit": limit}, idempotent=True), SecretInfo.from_dict, lambda c: self.list(cursor=c, limit=limit))
 
-    def get(self, name: str) -> Secret:
+    def get(self, name: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> Secret:
         """Returns a secret, without its value."""
-        return Secret(self, SecretInfo.from_dict(self._transport.request("GET", f"/v2/secrets/{quote(name, safe='')}", idempotent=True)))
+        return Secret(self, SecretInfo.from_dict(self._transport.request("GET", f"/v2/secrets/{quote(name, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True)))
 
     def set(self, name: str, *, visible: Optional[bool] = None, hosts: Optional[List[str]] = None, header: Optional[str] = None, format: Optional[str] = None, env_name: Optional[str] = None, scope: Optional["SecretScope"] = None, policies: Optional["SecretPolicies"] = None, value: Optional[str] = None, expected_version: Optional[int] = None, idempotency_key: Optional[str] = None) -> SecretInfo:
         """Stores or replaces a secret with its value, or changes one without it. Replacing it keeps its placeholder and raises its version; machines' new requests carry the new value within a second, and a visible secret's file holds it within a second. A running machine's processes keep the environment they started with; new commands get the new one. Asked again with the same Idempotency-Key and body, it returns the secret as that request left it. A deleted secret's name stored again is a new secret with a new placeholder, and so is a visible secret stored hidden. Without its value, it changes only the hosts, rules (`policies.rules`) and scope it names and keeps every other setting: hosts and rules only narrow, refused 400 when wider, since widening needs the value; a visible secret's scope only narrows, since its machines hold its value, and its file is removed within a second from each machine the scope leaves out. A secret not stored yet needs its value (404)."""
@@ -379,12 +460,82 @@ class AsyncSecret:
         """Its name."""
         return self.info.name
 
+    @property
+    def visible(self) -> Optional[bool]:
+        """The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted."""
+        return self.info.visible
+
+    @property
+    def hosts(self) -> Optional[List[str]]:
+        """The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible."""
+        return self.info.hosts
+
+    @property
+    def header(self) -> Optional[str]:
+        """The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only."""
+        return self.info.header
+
+    @property
+    def format(self) -> Optional[str]:
+        """The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only."""
+        return self.info.format
+
+    @property
+    def env_name(self) -> Optional[str]:
+        """The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name."""
+        return self.info.env_name
+
+    @property
+    def scope(self) -> Optional["SecretScope"]:
+        """The machines that may use it; every machine of the organization when omitted."""
+        return self.info.scope
+
+    @property
+    def policies(self) -> Optional["SecretPolicies"]:
+        """How it may be used. Hidden secrets only."""
+        return self.info.policies
+
+    @property
+    def object(self) -> Literal["secret", "unknown"]:
+        """Always `secret`."""
+        return self.info.object
+
+    @property
+    def state(self) -> Literal["active", "deleted", "unknown"]:
+        """`active` while requests carry it; `deleted` once deleted: a delete's answer."""
+        return self.info.state
+
+    @property
+    def placeholder(self) -> Optional[str]:
+        """What a machine holds in the value's place; none when visible."""
+        return self.info.placeholder
+
+    @property
+    def version(self) -> int:
+        """Raised by each change."""
+        return self.info.version
+
+    @property
+    def value_bytes(self) -> Optional[int]:
+        """Its value's length in bytes."""
+        return self.info.value_bytes
+
+    @property
+    def updated_at(self) -> Optional[str]:
+        """When it was last changed."""
+        return self.info.updated_at
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer, its state `deleted`."""
+        return self.info.deleted_at
+
     def __repr__(self) -> str:
         return f"AsyncSecret({self.info!r})"
 
-    async def refresh(self) -> "AsyncSecret":
+    async def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "AsyncSecret":
         """Returns a secret, without its value."""
-        self.info = (await self._c.get(self.name)).info
+        self.info = (await self._c.get(self.name, wait=wait, if_state=if_state)).info
         return self
 
     async def set(self, *, visible: Optional[bool] = None, hosts: Optional[List[str]] = None, header: Optional[str] = None, format: Optional[str] = None, env_name: Optional[str] = None, scope: Optional["SecretScope"] = None, policies: Optional["SecretPolicies"] = None, value: Optional[str] = None, expected_version: Optional[int] = None, idempotency_key: Optional[str] = None) -> "AsyncSecret":
@@ -395,6 +546,13 @@ class AsyncSecret:
     async def delete(self, *, idempotency_key: Optional[str] = None) -> SecretInfo:
         """Deletes a secret and its value: no request carries it from then on, open connections' included, and a visible secret's file is removed from every machine within a second. Deleted again, it returns the same deleted secret."""
         return await self._c.delete(self.name, idempotency_key=idempotency_key)
+
+    async def __aenter__(self) -> "AsyncSecret":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        """Deletes it when the ``async with`` block that holds it ends."""
+        await self.delete()
 
 
 class AsyncSecrets:
@@ -407,9 +565,9 @@ class AsyncSecrets:
         """Lists the organization's secrets by name, without their values."""
         return async_page(await self._transport.request("GET", f"/v2/secrets", query={"cursor": cursor, "limit": limit}, idempotent=True), SecretInfo.from_dict, lambda c: self.list(cursor=c, limit=limit))
 
-    async def get(self, name: str) -> AsyncSecret:
+    async def get(self, name: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> AsyncSecret:
         """Returns a secret, without its value."""
-        return AsyncSecret(self, SecretInfo.from_dict(await self._transport.request("GET", f"/v2/secrets/{quote(name, safe='')}", idempotent=True)))
+        return AsyncSecret(self, SecretInfo.from_dict(await self._transport.request("GET", f"/v2/secrets/{quote(name, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True)))
 
     async def set(self, name: str, *, visible: Optional[bool] = None, hosts: Optional[List[str]] = None, header: Optional[str] = None, format: Optional[str] = None, env_name: Optional[str] = None, scope: Optional["SecretScope"] = None, policies: Optional["SecretPolicies"] = None, value: Optional[str] = None, expected_version: Optional[int] = None, idempotency_key: Optional[str] = None) -> SecretInfo:
         """Stores or replaces a secret with its value, or changes one without it. Replacing it keeps its placeholder and raises its version; machines' new requests carry the new value within a second, and a visible secret's file holds it within a second. A running machine's processes keep the environment they started with; new commands get the new one. Asked again with the same Idempotency-Key and body, it returns the secret as that request left it. A deleted secret's name stored again is a new secret with a new placeholder, and so is a visible secret stored hidden. Without its value, it changes only the hosts, rules (`policies.rules`) and scope it names and keeps every other setting: hosts and rules only narrow, refused 400 when wider, since widening needs the value; a visible secret's scope only narrows, since its machines hold its value, and its file is removed within a second from each machine the scope leaves out. A secret not stored yet needs its value (404)."""

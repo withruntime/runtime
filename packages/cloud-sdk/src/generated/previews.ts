@@ -4,9 +4,9 @@
 import type { Page, RequestOptions, Transport } from "./runtime.js";
 import { Paginated } from "./runtime.js";
 
-/** A preview of the sandbox its path names to create, or its visibility and sites to change. */
+/** A preview of the machine its path names to create, or its visibility and sites to change. */
 export interface PreviewCreate {
-  /** The port inside the sandbox. At least 1. At most 65535. */
+  /** The port inside the machine. At least 1. At most 65535. */
   port: number;
   /** `private` (default): a token is needed. `public`: anyone with the address. */
   visibility?: "private" | "public" | (string & {});
@@ -20,11 +20,13 @@ export interface PreviewCreate {
 export interface PreviewInfo {
   /** Its ID. */
   id: string;
+  /** Its hostname, `<port>-<sandbox hex>.<domain>`: its own calls (`/v2/previews/{name}`) take it or its ID. */
+  name: string;
   /** Always `preview`. */
   object: "preview" | (string & {});
-  /** The sandbox whose port it shares. */
+  /** The machine whose port it shares. */
   sandboxId: string;
-  /** The port inside the sandbox. */
+  /** The port inside the machine. */
   port: number;
   /** `private` or `public`. */
   visibility: "private" | "public" | (string & {});
@@ -46,10 +48,18 @@ export interface PreviewInfo {
 
 /** What list takes in its query. */
 export type PreviewListQuery = {
-  /** The sandbox whose previews to list. */
+  /** The machine whose previews to list. */
   sandboxId: string;
   /** The most items the page holds. At least 1. At most 200. Default: 50. */
   limit?: number;
+};
+
+/** What get takes in its query. */
+export type PreviewGetQuery = {
+  /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+  wait?: number;
+  /** The state the caller last read, which `wait` waits for it to leave. */
+  ifState?: string;
 };
 
 /** What sign takes in its query. */
@@ -58,7 +68,7 @@ export type PreviewSignQuery = {
   ttlSeconds?: number;
 };
 
-/** One of previews: A port of a sandbox at a public HTTPS address: private with a signed token, or public. */
+/** One of previews: A port of a machine at a public HTTPS address: private with a signed token, or public. */
 export class Preview {
   readonly #c: Previews;
   /** What it was when last read. */
@@ -69,69 +79,134 @@ export class Preview {
     this.info = info;
   }
 
+  /** Its name. */
+  get name(): string {
+    return this.info.name;
+  }
+
   /** Its id. */
   get id(): string {
     return this.info.id;
   }
 
+  /** Always `preview`. */
+  get object(): "preview" | (string & {}) {
+    return this.info.object;
+  }
+
+  /** The machine whose port it shares. */
+  get sandboxId(): string {
+    return this.info.sandboxId;
+  }
+
+  /** The port inside the machine. */
+  get port(): number {
+    return this.info.port;
+  }
+
+  /** `private` or `public`. */
+  get visibility(): "private" | "public" | (string & {}) {
+    return this.info.visibility;
+  }
+
+  /** Its address. A private one also needs the token. */
+  get url(): string {
+    return this.info.url;
+  }
+
+  /** Where it is: `ready` once every serving host routes it. */
+  get state(): "making" | "ready" | "deleted" | (string & {}) {
+    return this.info.state;
+  }
+
+  /** A token signed for this answer, for a private preview and a key that may create one: send it in the `x-runtime-preview-token` header, or open the url with `?runtime_preview_token=<token>` in a browser. */
+  get token(): string | undefined {
+    return this.info.token;
+  }
+
+  /** When this answer's token stops working. */
+  get tokenExpiresAt(): string | undefined {
+    return this.info.tokenExpiresAt;
+  }
+
+  /** The sites that may show it in an iframe; none for any site. */
+  get embedOrigins(): string[] | undefined {
+    return this.info.embedOrigins;
+  }
+
+  /** When it was created. */
+  get createdAt(): string {
+    return this.info.createdAt;
+  }
+
+  /** When it was deleted: a delete's answer, its state `deleted`. */
+  get deletedAt(): string | undefined {
+    return this.info.deletedAt;
+  }
+
   /** Returns a preview; `sign` returns one with a token. */
-  async refresh(options?: RequestOptions): Promise<this> {
-    this.info = await (await this.#c.get(this.id, options)).info;
+  async refresh(query: PreviewGetQuery & RequestOptions = {}, options?: RequestOptions): Promise<this> {
+    this.info = (await this.#c.get(this.name, query, options)).info;
     return this;
   }
 
   /** Returns a private preview with a new token; tokens signed before keep their own expiry. */
-  async sign(query: PreviewSignQuery = {}, options?: RequestOptions): Promise<this> {
-    this.info = await this.#c.sign(this.id, query, options);
+  async sign(query: PreviewSignQuery & RequestOptions = {}, options?: RequestOptions): Promise<this> {
+    this.info = await this.#c.sign(this.name, query, options);
     return this;
   }
 
   /** Refuses every token signed for a preview so far, and returns a new one. */
   async rotate(options?: RequestOptions): Promise<this> {
-    this.info = await this.#c.rotate(this.id, options);
+    this.info = await this.#c.rotate(this.name, options);
     return this;
   }
 
   /** Stops sharing a port. */
   delete(options?: RequestOptions): Promise<PreviewInfo> {
-    return this.#c.delete(this.id, options);
+    return this.#c.delete(this.name, options);
+  }
+
+  /** Deletes it when the `await using` block that holds it ends. */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.delete();
   }
 }
 
-/** A port of a sandbox at a public HTTPS address: private with a signed token, or public. */
+/** A port of a machine at a public HTTPS address: private with a signed token, or public. */
 export class Previews {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
-  /** Shares a port of a sandbox at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview. */
+  /** Shares a port of a machine at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview. */
   async create(id: string, input: PreviewCreate, options?: RequestOptions): Promise<Preview> {
-    return new Preview(this, await this.#t.request<PreviewInfo>("POST", `/v2/sandboxes/${encodeURIComponent(id)}/previews`, { body: input, options }));
+    return new Preview(this, await this.transport.request<PreviewInfo>("POST", `/v2/sandboxes/${encodeURIComponent(id)}/previews`, { body: input, options }));
   }
 
-  /** Lists a sandbox's previews, lowest port first. */
-  list(query: PreviewListQuery, options?: RequestOptions): Paginated<PreviewInfo> {
-    return new Paginated<PreviewInfo>((cursor) => this.#t.request<Page<PreviewInfo>>("GET", `/v2/previews`, { query: { ...query, cursor }, options, idempotent: true }));
+  /** Lists a machine's previews, lowest port first. */
+  list(query: PreviewListQuery & RequestOptions, options?: RequestOptions): Paginated<PreviewInfo> {
+    return new Paginated<PreviewInfo>((cursor) => this.transport.request<Page<PreviewInfo>>("GET", `/v2/previews`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 
   /** Returns a preview; `sign` returns one with a token. */
-  async get(name: string, options?: RequestOptions): Promise<Preview> {
-    return new Preview(this, await this.#t.request<PreviewInfo>("GET", `/v2/previews/${encodeURIComponent(name)}`, { options, idempotent: true }));
+  async get(name: string, query: PreviewGetQuery & RequestOptions = {}, options?: RequestOptions): Promise<Preview> {
+    return new Preview(this, await this.transport.request<PreviewInfo>("GET", `/v2/previews/${encodeURIComponent(name)}`, { query: { ...query }, options, idempotent: true }));
   }
 
   /** Returns a private preview with a new token; tokens signed before keep their own expiry. */
-  sign(name: string, query: PreviewSignQuery = {}, options?: RequestOptions): Promise<PreviewInfo> {
-    return this.#t.request<PreviewInfo>("POST", `/v2/previews/${encodeURIComponent(name)}:sign`, { query: { ...query }, options });
+  sign(name: string, query: PreviewSignQuery & RequestOptions = {}, options?: RequestOptions): Promise<PreviewInfo> {
+    return this.transport.request<PreviewInfo>("POST", `/v2/previews/${encodeURIComponent(name)}:sign`, { query: { ...query }, options });
   }
 
   /** Refuses every token signed for a preview so far, and returns a new one. */
   rotate(name: string, options?: RequestOptions): Promise<PreviewInfo> {
-    return this.#t.request<PreviewInfo>("POST", `/v2/previews/${encodeURIComponent(name)}:rotate`, { options });
+    return this.transport.request<PreviewInfo>("POST", `/v2/previews/${encodeURIComponent(name)}:rotate`, { options });
   }
 
   /** Stops sharing a port. */
   delete(name: string, options?: RequestOptions): Promise<PreviewInfo> {
-    return this.#t.request<PreviewInfo>("DELETE", `/v2/previews/${encodeURIComponent(name)}`, { options });
+    return this.transport.request<PreviewInfo>("DELETE", `/v2/previews/${encodeURIComponent(name)}`, { options });
   }
 }

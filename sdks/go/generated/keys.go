@@ -34,11 +34,11 @@ type Key struct {
 	LastUsedAt *string `json:"lastUsedAt,omitempty"`
 	// MaxCost The most one request made with it commits, in US dollars.
 	MaxCost *string `json:"maxCost,omitempty"`
-	// SpendCap The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars.
+	// SpendCap The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars.
 	SpendCap *string `json:"spendCap,omitempty"`
 	// SpendCapWindowSeconds The rolling window spendCap counts over, in seconds.
 	SpendCapWindowSeconds *int64 `json:"spendCapWindowSeconds,omitempty"`
-	// Spent What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its sandboxes' and those of every key made with it. Listed and updated keys only.
+	// Spent What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its machines' and those of every key made with it. Listed and updated keys only.
 	Spent *string `json:"spent,omitempty"`
 	// DeletedAt When it was revoked: a delete's answer, its state `deleted`.
 	DeletedAt *string `json:"deletedAt,omitempty"`
@@ -64,11 +64,13 @@ type KeyCreate struct {
 	ProjectID *string `json:"projectId,omitempty"`
 	// AgentID One of the organization's agents or CI pipelines it acts as, for the caller; the caller itself when omitted.
 	AgentID *string `json:"agentId,omitempty"`
+	// Actions The actions it holds, each `product:action` as each call's reference page names it (`sandboxes:create`, `sandboxes:exec`), on every plan: it acts as an agent of its own granted exactly these, never more than its caller may do or spend, in every project its caller reaches (one held to one project, with projectId or by a caller that reaches one alone, starts at Growth), and its agent and role are deleted with it. Omitted, it holds every action its holder's grant allows, or, made with a key that has actions, those actions. Not with agentId.
+	Actions []string `json:"actions,omitempty"`
 	// ExpiresInSeconds Seconds until it stops working; never when omitted. At least 60. At most 31536000.
 	ExpiresInSeconds *int64 `json:"expiresInSeconds,omitempty"`
 	// MaxCost The most one request made with it may commit, in US dollars (`"5.00"`): one asking more is refused 403, and a create that names no maxCost gets this one. Made with a key that has one, at most that key's.
 	MaxCost *string `json:"maxCost,omitempty"`
-	// SpendCap The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running sandboxes may pass it. Made with a key that has one, at most that key's, and counted in it too.
+	// SpendCap The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running machines may pass it. Made with a key that has one, at most that key's, and counted in it too.
 	SpendCap *string `json:"spendCap,omitempty"`
 	// SpendCapWindowSeconds The rolling window spendCap counts over, in seconds; a day when omitted. At least 60. At most 2592000.
 	SpendCapWindowSeconds *int64 `json:"spendCapWindowSeconds,omitempty"`
@@ -93,7 +95,7 @@ type KeyUpdate struct {
 	Name *string `json:"name,omitempty"`
 	// MaxCost The most one request made with it may commit, in US dollars (`"5.00"`). Never more than a key it was made with, nor than the key that changes it: a key never raises its own caps.
 	MaxCost *string `json:"maxCost,omitempty"`
-	// SpendCap The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it.
+	// SpendCap The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it.
 	SpendCap *string `json:"spendCap,omitempty"`
 	// SpendCapWindowSeconds The rolling window spendCap counts over, in seconds; kept when omitted, a day for a key that had no spendCap. At least 60. At most 2592000.
 	SpendCapWindowSeconds *int64 `json:"spendCapWindowSeconds,omitempty"`
@@ -134,9 +136,9 @@ func (c *Keys) List(ctx context.Context, q KeyListQuery, opts *RequestOptions) (
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Keys) ListAll(ctx context.Context, q KeyListQuery, opts *RequestOptions) iter.Seq2[Key, error] {
-	return all(func(cursor *string) (*Page[Key], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Key], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

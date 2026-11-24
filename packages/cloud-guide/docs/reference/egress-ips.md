@@ -1,6 +1,6 @@
 # EgressIp API reference
 
-A static egress IP: a public address every sandbox of the org sends from, the same every time, for others' allow-lists.
+A static egress IP: a public address every machine of the org sends from, the same every time, for others' allow-lists.
 
 Base URL: `https://api.withruntime.com`. [Authentication, idempotency and errors](./overview) work the same way for every product.
 
@@ -53,8 +53,8 @@ result = runtime.egress_ips.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.egress_ips.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.egress_ips.list
 ```
 
 ```bash title="CLI"
@@ -74,7 +74,7 @@ A static egress IP's settings, as it keeps them.
 
 ### EgressIp
 
-A static egress IP: every sandbox of the org sends from it.
+A static egress IP: every machine of the org sends from it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -83,6 +83,6 @@ A static egress IP: every sandbox of the org sends from it.
 | `id` | string | Yes | Its ID. |
 | `object` | one of `ip` | Yes | Always `ip`. |
 | `address` | string | Yes | The address. |
-| `state` | one of `making`, `ready`, `deleted` | Yes | Its state: `ready` once sandboxes send from it. |
-| `disabled` | boolean | Yes | Turned off: its sandboxes send from the shared addresses. |
+| `state` | one of `making`, `ready`, `deleted` | Yes | Its state: `ready` once machines send from it. |
+| `disabled` | boolean | Yes | Turned off: its machines send from the shared addresses. |
 | `createdAt` | string (RFC 3339) | Yes | When it was reserved. |

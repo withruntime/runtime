@@ -52,8 +52,8 @@ result = runtime.otel.create(endpoint="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.otel.create(endpoint: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.otel.create(endpoint: "example")
 ```
 
 ```bash title="CLI"
@@ -103,8 +103,8 @@ result = runtime.otel.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.otel.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.otel.list
 ```
 
 ```bash title="CLI"
@@ -147,8 +147,8 @@ result = runtime.otel.delete("EXPORT_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.otel.delete("EXPORT_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.otel.delete("EXPORT_ID")
 ```
 
 ```bash title="CLI"

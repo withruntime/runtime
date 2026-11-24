@@ -17,11 +17,19 @@ public final class Secrets {
 
   /** Which machines may use a secret. */
   public static final class SecretScope {
-    /** Machines with every label of any one of these sets. */
+    /** Machines with every label of any one of these sets. Give this or `none`. */
     public List<Map<String, String>> labelsAny;
+
+    /** `true`: no machine. Runtime alone uses the secret: it is in no machine's requests or environment. A registry login an image import pulls with (`pullSecret`) has this scope. Give this or `labelsAny`. */
+    public Boolean none;
 
     public SecretScope labelsAny(List<Map<String, String>> v) {
       this.labelsAny = v;
+      return this;
+    }
+
+    public SecretScope none(Boolean v) {
+      this.none = v;
       return this;
     }
 
@@ -29,12 +37,14 @@ public final class Secrets {
       Map<String, Object> m = KitJson.object(raw);
       SecretScope o = new SecretScope();
       o.labelsAny = (m.get("labelsAny") == null ? null : KitJson.array(m.get("labelsAny")).stream().map(i0 -> KitJson.asStringMap(i0)).toList());
+      o.none = (m.get("none") instanceof Boolean b ? b : null);
       return o;
     }
 
     Map<String, Object> toMap() {
       Map<String, Object> m = new LinkedHashMap<>();
       if (labelsAny != null) m.put("labelsAny", labelsAny);
+      if (none != null) m.put("none", none);
       return m;
     }
   }
@@ -577,14 +587,40 @@ public final class Secrets {
     }
   }
 
+  /** What get takes in its query. */
+  public static final class SecretGetQuery {
+    /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+    public Double wait;
+
+    /** The state the caller last read, which `wait` waits for it to leave. */
+    public String ifState;
+
+    public SecretGetQuery wait(Double v) {
+      this.wait = v;
+      return this;
+    }
+
+    public SecretGetQuery ifState(String v) {
+      this.ifState = v;
+      return this;
+    }
+
+    Map<String, Object> query() {
+      Map<String, Object> q = new LinkedHashMap<>();
+      if (wait != null) q.put("wait", String.valueOf(wait));
+      if (ifState != null) q.put("ifState", String.valueOf(ifState));
+      return q;
+    }
+  }
+
   /** Lists the organization's secrets by name, without their values. */
   public Page<Secret> list(SecretListQuery query, Transport.RequestOptions opts) {
     return Page.of(t.request("GET", "/v2/secrets", query == null ? null : query.query(), null, new Transport.Call(true, null), opts), Secret::of);
   }
 
   /** Returns a secret, without its value. */
-  public Secret get(String name, Transport.RequestOptions opts) {
-    return Secret.of(t.request("GET", "/v2/secrets/" + Transport.path(name), null, null, new Transport.Call(true, null), opts));
+  public Secret get(String name, SecretGetQuery query, Transport.RequestOptions opts) {
+    return Secret.of(t.request("GET", "/v2/secrets/" + Transport.path(name), query == null ? null : query.query(), null, new Transport.Call(true, null), opts));
   }
 
   /** Stores or replaces a secret with its value, or changes one without it. Replacing it keeps its placeholder and raises its version; machines' new requests carry the new value within a second, and a visible secret's file holds it within a second. A running machine's processes keep the environment they started with; new commands get the new one. Asked again with the same Idempotency-Key and body, it returns the secret as that request left it. A deleted secret's name stored again is a new secret with a new placeholder, and so is a visible secret stored hidden. Without its value, it changes only the hosts, rules (`policies.rules`) and scope it names and keeps every other setting: hosts and rules only narrow, refused 400 when wider, since widening needs the value; a visible secret's scope only narrows, since its machines hold its value, and its file is removed within a second from each machine the scope leaves out. A secret not stored yet needs its value (404). */

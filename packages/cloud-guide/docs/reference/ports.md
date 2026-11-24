@@ -1,6 +1,6 @@
 # Port API reference
 
-A public TCP port carried to a port of a sandbox: a database, a game server, anything that is not HTTP.
+A public TCP port carried to a port of a machine: a database, a game server, anything that is not HTTP.
 
 Base URL: `https://api.withruntime.com`. [Authentication, idempotency and errors](./overview) work the same way for every product.
 
@@ -18,7 +18,7 @@ Its states: `making`, `ready`, `deleted`.
 
 `POST /v2/ports`
 
-Opens a public TCP port to a port of a sandbox: raw TCP, carried as it is. The public port is assigned from a pool of 10,000; returns 409 when every one is in use. Asked again for the same sandbox and port, it returns the same public port.
+Opens a public TCP port to a port of a machine: raw TCP, carried as it is. The public port is assigned from a pool of 10,000; returns 409 when every one is in use. Asked again for the same machine and port, it returns the same public port.
 
 Its action, for a key's grant: `ports:create`.
 
@@ -54,8 +54,8 @@ result = runtime.ports.create(sandbox_id="SANDBOX_ID", port=3000)
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.ports.create(sandbox_id: "SANDBOX_ID", port: 3000)
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.ports.create(sandbox_id: "SANDBOX_ID", port: 3000)
 ```
 
 ```bash title="CLI"
@@ -66,7 +66,7 @@ runtime ports create --sandbox-id SANDBOX_ID --port 3000
 
 `GET /v2/ports`
 
-Lists the org's public TCP ports, or one sandbox's, by `connect`.
+Lists the org's public TCP ports, or one machine's, by `connect`.
 
 Its action, for a key's grant: `ports:list`.
 
@@ -74,7 +74,7 @@ Query:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `sandboxId` | string | No | Only this sandbox's ports. |
+| `sandboxId` | string | No | Only this machine's ports. |
 | `cursor` | string | No | Where the page starts: a page's `next`. |
 | `limit` | integer | No | The most items the page holds. At least 1. At most 200. Default: 50. |
 
@@ -104,8 +104,8 @@ result = runtime.ports.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.ports.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.ports.list
 ```
 
 ```bash title="CLI"
@@ -150,8 +150,8 @@ result = runtime.ports.delete("PORT_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.ports.delete("PORT_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.ports.delete("PORT_ID")
 ```
 
 ```bash title="CLI"
@@ -166,8 +166,8 @@ A public TCP port to open.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `sandboxId` | string | Yes | The sandbox to carry to. |
-| `port` | integer | Yes | The port inside the sandbox, 1 to 65535. |
+| `sandboxId` | string | Yes | The machine to carry to. |
+| `port` | integer | Yes | The port inside the machine, 1 to 65535. |
 
 ### PortSettings
 
@@ -175,21 +175,21 @@ A public TCP port's settings, as it keeps them.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `port` | integer | Yes | The port inside the sandbox. At least 1. At most 65535. |
+| `port` | integer | Yes | The port inside the machine. At least 1. At most 65535. |
 
 ### Port
 
-A public TCP port: raw TCP from a public address and port to a port of a sandbox.
+A public TCP port: raw TCP from a public address and port to a port of a machine.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `port` | integer | Yes | The port inside the sandbox. At least 1. At most 65535. |
+| `port` | integer | Yes | The port inside the machine. At least 1. At most 65535. |
 | `id` | string | Yes | Its ID. |
 | `object` | one of `port` | Yes | Always `port`. |
 | `connect` | string | Yes | `address:publicPort` (`[address]:publicPort` for IPv6), for a client's host and port. |
 | `address` | string | Yes | The public address to connect to. |
 | `publicPort` | integer | Yes | The public port to connect to. |
-| `sandboxId` | string | Yes | The sandbox it carries to. |
+| `sandboxId` | string | Yes | The machine it carries to. |
 | `state` | one of `making`, `ready`, `deleted` | Yes | Its state: `ready` once every edge carries it. |
 | `disabled` | boolean | Yes | Turned off by Runtime: no connection passes. |
 | `createdAt` | string (RFC 3339) | Yes | When it was opened. |

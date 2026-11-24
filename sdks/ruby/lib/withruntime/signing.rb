@@ -154,7 +154,10 @@ module WithRuntime
     # the server takes a nonce once.
     def authorize(key, project, method, target, body = nil, idempotency_key: nil)
       signing = key_for(key, project)
-      return { "Authorization" => "Bearer #{key}" } unless signing
+      # The project goes with every call, a bearer key's too: a key that
+      # reaches the whole org would otherwise list, change and delete in
+      # every project.
+      return { "Authorization" => "Bearer #{key}" }.merge(project ? { "Runtime-Project" => project } : {}) unless signing
 
       signing.sign_request(project, method, target, body, idempotency_key: idempotency_key)
     end

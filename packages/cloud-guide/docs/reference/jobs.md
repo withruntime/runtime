@@ -59,8 +59,8 @@ result = runtime.jobs.create()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.jobs.create
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.jobs.create
 ```
 
 ```bash title="CLI"
@@ -76,6 +76,13 @@ Returns a job.
 Its action, for a key's grant: `jobs:get`.
 
 Path: `id`.
+
+Query:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `wait` | number | No | Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. |
+| `ifState` | string | No | The state the caller last read, which `wait` waits for it to leave. |
 
 Returns a [Job](#job).
 
@@ -105,8 +112,8 @@ result = runtime.jobs.get("JOB_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.jobs.get("JOB_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.jobs.get("JOB_ID")
 ```
 
 ```bash title="CLI"
@@ -157,8 +164,8 @@ result = runtime.jobs.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.jobs.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.jobs.list
 ```
 
 ```bash title="CLI"
@@ -203,8 +210,8 @@ result = runtime.jobs.delete("JOB_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.jobs.delete("JOB_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.jobs.delete("JOB_ID")
 ```
 
 ```bash title="CLI"
@@ -249,8 +256,8 @@ result = runtime.jobs.pause("JOB_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.jobs.pause("JOB_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.jobs.pause("JOB_ID")
 ```
 
 ```bash title="CLI"
@@ -295,8 +302,8 @@ result = runtime.jobs.resume("JOB_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.jobs.resume("JOB_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.jobs.resume("JOB_ID")
 ```
 
 ```bash title="CLI"
@@ -345,8 +352,8 @@ result = runtime.jobs.update("JOB_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.jobs.update("JOB_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.jobs.update("JOB_ID")
 ```
 
 ```bash title="CLI"
@@ -391,8 +398,8 @@ result = runtime.jobs.run("JOB_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.jobs.run("JOB_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.jobs.run("JOB_ID")
 ```
 
 ```bash title="CLI"
@@ -413,7 +420,7 @@ When a job runs: once, at `at`; or at each time of its `cron` in its `timezone`.
 
 ### SandboxRun
 
-A command a sandbox runs once it starts: when it ends, the sandbox stops.
+A command a machine runs once it starts: when it ends, the machine stops.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -459,9 +466,9 @@ A job's settings: what each of its runs is made with.
 | `run` | [SandboxRun](#sandboxrun) | No | The command each run runs; the run ends when it ends. |
 | `retry` | [JobRetry](#jobretry) | No | How a failed run is run again; never when omitted. |
 | `secrets` | [JobSecrets](#jobsecrets) | No | Which of its org's secrets each run gets; every one whose scope admits it when omitted. |
-| `vcpu` | integer | No | Each run's vCPUs. At least 1. Default: 1. |
-| `memoryGB` | number | No | Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1. |
-| `diskGB` | number | No | Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4. |
+| `vcpu` | integer | No | Each run's vCPUs; a job's default (1) when omitted. At least 1. |
+| `memoryGB` | number | No | Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1. |
+| `diskGB` | number | No | Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1. |
 | `image` | string | No | The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. |
 | `user` | one of `runtime`, `root` | No | Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`. |
 | `volumes` | list of [VolumeMount](#volumemount) | No | Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it. |
@@ -477,9 +484,9 @@ A job to create: its schedule and run are required.
 | `run` | [SandboxRun](#sandboxrun) | No | The command each run runs; the run ends when it ends. |
 | `retry` | [JobRetry](#jobretry) | No | How a failed run is run again; never when omitted. |
 | `secrets` | [JobSecrets](#jobsecrets) | No | Which of its org's secrets each run gets; every one whose scope admits it when omitted. |
-| `vcpu` | integer | No | Each run's vCPUs. At least 1. Default: 1. |
-| `memoryGB` | number | No | Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1. |
-| `diskGB` | number | No | Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4. |
+| `vcpu` | integer | No | Each run's vCPUs; a job's default (1) when omitted. At least 1. |
+| `memoryGB` | number | No | Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1. |
+| `diskGB` | number | No | Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1. |
 | `image` | string | No | The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. |
 | `user` | one of `runtime`, `root` | No | Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`. |
 | `volumes` | list of [VolumeMount](#volumemount) | No | Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it. |
@@ -509,9 +516,9 @@ A job.
 | `run` | [SandboxRun](#sandboxrun) | No | The command each run runs; the run ends when it ends. |
 | `retry` | [JobRetry](#jobretry) | No | How a failed run is run again; never when omitted. |
 | `secrets` | [JobSecrets](#jobsecrets) | No | Which of its org's secrets each run gets; every one whose scope admits it when omitted. |
-| `vcpu` | integer | No | Each run's vCPUs. At least 1. Default: 1. |
-| `memoryGB` | number | No | Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). At least 1. Default: 1. |
-| `diskGB` | number | No | Each run's disk in GB, to the MiB, over a fresh copy of its image. At least 1. Default: 4. |
+| `vcpu` | integer | No | Each run's vCPUs; a job's default (1) when omitted. At least 1. |
+| `memoryGB` | number | No | Each run's memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`0.5`). A job's default (1) when omitted. At least 1. |
+| `diskGB` | number | No | Each run's disk in GB, to the MiB, over a fresh copy of its image. When omitted, a job's default (4) or its image's size, whichever is larger. At least 1. |
 | `image` | string | No | The image each run boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. |
 | `user` | one of `runtime`, `root` | No | Who its command runs as: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`. |
 | `volumes` | list of [VolumeMount](#volumemount) | No | Volumes each run attaches and mounts, at most one, in the job's project; a run waits while another machine holds it. |

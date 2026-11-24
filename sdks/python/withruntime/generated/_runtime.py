@@ -95,6 +95,10 @@ class PaymentRequiredError(RuntimeApiError):
     """``payment_required`` (402): Add a card in the console; the work paused for payment resumes. Nothing was deleted."""
 
 
+class CardRequiredError(RuntimeApiError):
+    """``card_required`` (402): Add a card at https://withruntime.com/account/start to start the trial, then send the request again."""
+
+
 class ForbiddenError(RuntimeApiError):
     """``forbidden`` (403): Use a key whose grants include this action, or ask an owner of the organization."""
 
@@ -105,6 +109,10 @@ class LimitExceededError(RuntimeApiError):
 
 class NotFoundError(RuntimeApiError):
     """``not_found`` (404): Check the ID or path; list the resources to find it."""
+
+
+class MethodNotAllowedError(RuntimeApiError):
+    """``method_not_allowed`` (405): Send it with a method the Allow header names."""
 
 
 class AlreadyExistsError(RuntimeApiError):
@@ -148,9 +156,11 @@ _FAMILY = {
     "invalid_request": InvalidRequestError,
     "unauthorized": UnauthorizedError,
     "payment_required": PaymentRequiredError,
+    "card_required": CardRequiredError,
     "forbidden": ForbiddenError,
     "limit_exceeded": LimitExceededError,
     "not_found": NotFoundError,
+    "method_not_allowed": MethodNotAllowedError,
     "already_exists": AlreadyExistsError,
     "conflict": ConflictError,
     "too_large": TooLargeError,

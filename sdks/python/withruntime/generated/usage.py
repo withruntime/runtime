@@ -126,7 +126,7 @@ class KeyUsage:
 class KeySpendCap:
     """The spend cap a key's creates are held to, and what is left under it."""
 
-    #: The most its holder's sandboxes may spend over windowSeconds, in US dollars.
+    #: The most its holder's machines may spend over windowSeconds, in US dollars.
     cap: str
     #: What they spent over the window, in US dollars, as the cap counts it.
     spent: str
@@ -150,6 +150,119 @@ class KeySpendCap:
             "spent": self.spent,
             "remaining": self.remaining,
             "windowSeconds": self.window_seconds,
+        })
+
+
+@dataclass
+class UsageHour:
+    """One product's use in one hour, at the card's prices."""
+
+    #: The hour's first moment (UTC).
+    at: str
+    #: What it was used by: the machine's kind (`sandbox`, `app`, `function`, `ci`, ...), what is kept on disk (`disk`, `volume`, `snapshot`, `image`), or `traffic`, what was sent out; `machine` or `storage` when what used it was deleted too long ago to name.
+    product: str
+    #: What it costs on the price card, before any credit, in US dollars.
+    charged: str
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "UsageHour":
+        return cls(
+            at=d["at"],
+            product=d["product"],
+            charged=d["charged"],
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return compact({
+            "at": self.at,
+            "product": self.product,
+            "charged": self.charged,
+        })
+
+
+@dataclass
+class ProductLine:
+    """One meter's part of one product's month: a quantity at the card's rate."""
+
+    #: What it was used by, as `hours` names it (`sandbox`, `disk`, `traffic`, ...).
+    product: str
+    #: The card's meter (`cpu`, `memory`, `traffic-out`, ...).
+    meter: str
+    #: The meter's name on the card (`CPU`, `Memory`), from `names::METERS`.
+    name: str
+    #: Used this month, in `unit`, as a decimal in text.
+    quantity: str
+    #: What `quantity` counts: `active vCPU-hours`, `GiB-hours`, `GiB-months`, `GB`, ...
+    unit: str
+    #: The card's price for one of `unit`, as the card writes it (`$0.03 per active vCPU-hour`).
+    rate: str
+    #: What it costs on the price card, before any credit, in US dollars.
+    charged: str
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ProductLine":
+        return cls(
+            product=d["product"],
+            meter=d["meter"],
+            name=d["name"],
+            quantity=d["quantity"],
+            unit=d["unit"],
+            rate=d["rate"],
+            charged=d["charged"],
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return compact({
+            "product": self.product,
+            "meter": self.meter,
+            "name": self.name,
+            "quantity": self.quantity,
+            "unit": self.unit,
+            "rate": self.rate,
+            "charged": self.charged,
+        })
+
+
+@dataclass
+class KeySpend:
+    """What one key, or what was made with no key, used this month."""
+
+    #: `key`: one key's. `console`: made signed in, with no key. `others`: keys the caller may not see, together. `unknown`: made by something deleted too long ago to name.
+    source: str
+    #: Charged this month at the card's rates, in US dollars.
+    charged: str
+    #: The key the machines and storage were made with. Omitted for what was made with no key (signed in to the console), and for `others`.
+    key_id: Optional[str] = None
+    #: The key's name.
+    name: Optional[str] = None
+    #: The person the key acts for, or who made it signed in to the console.
+    account_id: Optional[str] = None
+    #: That person's email address.
+    email: Optional[str] = None
+    #: The agent or CI pipeline the key acts as.
+    agent_id: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "KeySpend":
+        return cls(
+            source=d["source"],
+            charged=d["charged"],
+            key_id=d.get("keyId"),
+            name=d.get("name"),
+            account_id=d.get("accountId"),
+            email=d.get("email"),
+            agent_id=d.get("agentId"),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return compact({
+            "source": self.source,
+            "charged": self.charged,
+            "keyId": self.key_id,
+            "name": self.name,
+            "accountId": self.account_id,
+            "email": self.email,
+            "agentId": self.agent_id,
         })
 
 
@@ -181,6 +294,12 @@ class Usage:
     key: Optional["KeyUsage"] = None
     #: The spend cap this key's creates are held to: the tightest of its own, those of the keys it was made with, and its holder's grants'. Omitted when none holds it.
     key_spend_cap: Optional["KeySpendCap"] = None
+    #: With `by=hour`: what each product used each hour, since the month began or 7 days ago, whichever is earlier, oldest first. Only hours that cost something.
+    hours: Optional[List["UsageHour"]] = None
+    #: With `by=hour`: what each product's month is made of, a line for each meter it used, its quantity at the card's rate. A product's lines sum to its hours since the month began.
+    lines: Optional[List["ProductLine"]] = None
+    #: With `by=key`: what each key's machines and storage used this month, most first. A key the caller may not see is counted under `others`.
+    keys: Optional[List["KeySpend"]] = None
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Usage":
@@ -197,6 +316,9 @@ class Usage:
             spend_cap=d.get("spendCap"),
             key=KeyUsage.from_dict(d["key"]) if d.get("key") is not None else None,
             key_spend_cap=KeySpendCap.from_dict(d["keySpendCap"]) if d.get("keySpendCap") is not None else None,
+            hours=[UsageHour.from_dict(i) for i in d["hours"]] if d.get("hours") is not None else None,
+            lines=[ProductLine.from_dict(i) for i in d["lines"]] if d.get("lines") is not None else None,
+            keys=[KeySpend.from_dict(i) for i in d["keys"]] if d.get("keys") is not None else None,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -213,6 +335,9 @@ class Usage:
             "spendCap": self.spend_cap,
             "key": self.key,
             "keySpendCap": self.key_spend_cap,
+            "hours": self.hours,
+            "lines": self.lines,
+            "keys": self.keys,
         })
 
 
@@ -224,7 +349,7 @@ class UsageLine:
     id: str
     #: The resource it was used by: a machine, a disk or an address.
     subject_id: str
-    #: The ID its product names it by (a sandbox's own ID).
+    #: The ID its product names it by (a machine's own ID).
     resource_id: str
     #: Its project.
     project_id: str
@@ -332,9 +457,9 @@ class UsageClient:
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
 
-    def get(self, *, key: Optional[str] = None) -> Usage:
+    def get(self, *, key: Optional[str] = None, by: Optional[List[str]] = None) -> Usage:
         """Returns the organization's credit and charges (everything credited and spent, what is left, and this month's use and charges by meter), its plan, and every limit it is held to with what it uses of each now; with key, that key's spend."""
-        return Usage.from_dict(self._transport.request("GET", f"/v2/usage", query={"key": key}, idempotent=True))
+        return Usage.from_dict(self._transport.request("GET", f"/v2/usage", query={"key": key, "by": by}, idempotent=True))
 
     def export(self, *, since: str, until: str, by: Optional[str] = None, resource_id: Optional[List[str]] = None, cursor: Optional[str] = None, limit: Optional[int] = None) -> UsageExport:
         """Returns the organization's measured usage in a time range, of every resource or only those named: each meter of each machine's, disk's or address's hour, what it used and its price at the card, oldest first, paginated. Each line settles at its hour's end and is final once finalThrough reaches it, so closed hours can be read while resources run."""
@@ -347,13 +472,13 @@ class AsyncUsageClient:
     def __init__(self, transport: AsyncTransport) -> None:
         self._transport = transport
 
-    async def get(self, *, key: Optional[str] = None) -> Usage:
+    async def get(self, *, key: Optional[str] = None, by: Optional[List[str]] = None) -> Usage:
         """Returns the organization's credit and charges (everything credited and spent, what is left, and this month's use and charges by meter), its plan, and every limit it is held to with what it uses of each now; with key, that key's spend."""
-        return Usage.from_dict(await self._transport.request("GET", f"/v2/usage", query={"key": key}, idempotent=True))
+        return Usage.from_dict(await self._transport.request("GET", f"/v2/usage", query={"key": key, "by": by}, idempotent=True))
 
     async def export(self, *, since: str, until: str, by: Optional[str] = None, resource_id: Optional[List[str]] = None, cursor: Optional[str] = None, limit: Optional[int] = None) -> UsageExport:
         """Returns the organization's measured usage in a time range, of every resource or only those named: each meter of each machine's, disk's or address's hour, what it used and its price at the card, oldest first, paginated. Each line settles at its hour's end and is final once finalThrough reaches it, so closed hours can be read while resources run."""
         return UsageExport.from_dict(await self._transport.request("GET", f"/v2/usage/export", query={"since": since, "until": until, "by": by, "resourceId": resource_id, "cursor": cursor, "limit": limit}, idempotent=True))
 
 
-__all__ = ["MeterUse", "Limit", "KeyUsage", "KeySpendCap", "Usage", "UsageLine", "UsageExport", "UsageClient", "AsyncUsageClient"]
+__all__ = ["MeterUse", "Limit", "KeyUsage", "KeySpendCap", "UsageHour", "ProductLine", "KeySpend", "Usage", "UsageLine", "UsageExport", "UsageClient", "AsyncUsageClient"]

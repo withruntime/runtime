@@ -1,14 +1,14 @@
 # Desktops
 
-A Linux desktop with Chromium for an agent that uses a computer: the agent reads its screen with [`GET /v2/desktops/{id}/screenshot`](./reference/desktops#screenshot) and moves, clicks, scrolls and types with [`POST /v2/desktops/{id}:act`](./reference/desktops#act), and you watch it in the browser or a VNC client.
+A Linux desktop with Chromium for an agent that uses a computer: the agent reads its screen with [`GET /v2/desktops/{id}/screenshot`](./reference/desktops#screenshot) and moves, clicks, scrolls and types with [`POST /v2/desktops/{id}:act`](./reference/desktops#act), and you watch it in the browser.
 
-A machine running a Linux desktop with Chromium, for agents that use a computer: screenshot returns what its screen shows and act moves and clicks its mouse and types on its keyboard. It is shown in the browser through noVNC at its preview on port 6080 and to VNC clients on 5900. It pauses after 300 seconds with nothing happening, its memory kept.
+A machine running a Linux desktop with Chromium, for agents that use a computer: screenshot returns what its screen shows and act moves and clicks its mouse and types on its keyboard. It is shown in the browser through noVNC at its preview on port 6080; its VNC server answers only inside the machine, so a link signed for that preview is the one way to watch it. It pauses after 300 seconds with nothing happening, its memory kept.
 
 | Default | Value |
 | --- | --- |
 | vCPUs | 2 |
 | Memory | 4 GB |
-| Disk | 4 GB |
+| Disk | 4 GB, or its image's size when larger |
 | Image | `runtime/desktops` |
 | Pauses when idle | After 300 seconds |
 

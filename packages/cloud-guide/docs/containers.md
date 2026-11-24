@@ -6,9 +6,9 @@ A machine that runs one OCI image from any registry under Docker on its own netw
 
 | Default | Value |
 | --- | --- |
-| vCPUs | 1 |
-| Memory | 1 GB |
-| Disk | 4 GB |
+| vCPUs | 2 |
+| Memory | 4 GB |
+| Disk | 4 GB, or its image's size when larger |
 | Image | `runtime/standard` |
 | Pauses when idle | After 300 seconds |
 

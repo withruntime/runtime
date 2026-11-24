@@ -20,7 +20,7 @@ pip install langchain-withruntime
 This installs the Runtime SDK, [`withruntime`](https://pypi.org/project/withruntime/),
 and Deep Agents. Set `RUNTIME_API_KEY` to a key from
 https://withruntime.com/account/keys. You can also run `npx -y withruntime login`
-once on this machine. A new account starts on a free trial. No card is needed.
+once on this machine. Signing up takes no card. Your first sandbox asks for one, and the trial starts then.
 
 ## Use it
 

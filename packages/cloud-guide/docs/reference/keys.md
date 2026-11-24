@@ -58,8 +58,8 @@ result = runtime.keys.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.keys.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.keys.list
 ```
 
 ```bash title="CLI"
@@ -106,8 +106,8 @@ result = runtime.keys.create(name="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.keys.create(name: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.keys.create(name: "example")
 ```
 
 ```bash title="CLI"
@@ -154,8 +154,8 @@ result = runtime.keys.update("KEY_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.keys.update("KEY_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.keys.update("KEY_ID")
 ```
 
 ```bash title="CLI"
@@ -200,8 +200,8 @@ result = runtime.keys.delete("KEY_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.keys.delete("KEY_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.keys.delete("KEY_ID")
 ```
 
 ```bash title="CLI"
@@ -227,9 +227,9 @@ An API key, without its secret.
 | `expiresAt` | string (RFC 3339) | No | When it stops working; never when omitted. |
 | `lastUsedAt` | string (RFC 3339) | No | When it was last used. |
 | `maxCost` | string (US dollars, decimal) | No | The most one request made with it commits, in US dollars. |
-| `spendCap` | string (US dollars, decimal) | No | The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. |
+| `spendCap` | string (US dollars, decimal) | No | The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. |
 | `spendCapWindowSeconds` | integer | No | The rolling window spendCap counts over, in seconds. |
-| `spent` | string (US dollars, decimal) | No | What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its sandboxes' and those of every key made with it. Listed and updated keys only. |
+| `spent` | string (US dollars, decimal) | No | What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its machines' and those of every key made with it. Listed and updated keys only. |
 | `deletedAt` | string (RFC 3339) | No | When it was revoked: a delete's answer, its state `deleted`. |
 
 ### KeyAuthorization
@@ -252,9 +252,10 @@ A key to make.
 | `name` | string | Yes | Its name. At least 1 character. At most 64 characters. |
 | `projectId` | string | No | Held to this one project (Growth and up); every project its holder reaches when omitted. |
 | `agentId` | string | No | One of the organization's agents or CI pipelines it acts as, for the caller; the caller itself when omitted. |
+| `actions` | list of string | No | The actions it holds, each `product:action` as each call's reference page names it (`sandboxes:create`, `sandboxes:exec`), on every plan: it acts as an agent of its own granted exactly these, never more than its caller may do or spend, in every project its caller reaches (one held to one project, with projectId or by a caller that reaches one alone, starts at Growth), and its agent and role are deleted with it. Omitted, it holds every action its holder's grant allows, or, made with a key that has actions, those actions. Not with agentId. |
 | `expiresInSeconds` | integer | No | Seconds until it stops working; never when omitted. At least 60. At most 31536000. |
 | `maxCost` | string (US dollars, decimal) | No | The most one request made with it may commit, in US dollars (`"5.00"`): one asking more is refused 403, and a create that names no maxCost gets this one. Made with a key that has one, at most that key's. |
-| `spendCap` | string (US dollars, decimal) | No | The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running sandboxes may pass it. Made with a key that has one, at most that key's, and counted in it too. |
+| `spendCap` | string (US dollars, decimal) | No | The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running machines may pass it. Made with a key that has one, at most that key's, and counted in it too. |
 | `spendCapWindowSeconds` | integer | No | The rolling window spendCap counts over, in seconds; a day when omitted. At least 60. At most 2592000. |
 | `userCode` | string | No | The code a device shows (OAuth 2.0 device flow, RFC 8628): the key goes to that device, never in this answer. |
 | `authorization` | [KeyAuthorization](#keyauthorization) | No | An OAuth client's request (authorization code with PKCE): the key goes to that client, never in this answer. |
@@ -276,9 +277,9 @@ A key just made, with its secret: shown this once, never again.
 | `expiresAt` | string (RFC 3339) | No | When it stops working; never when omitted. |
 | `lastUsedAt` | string (RFC 3339) | No | When it was last used. |
 | `maxCost` | string (US dollars, decimal) | No | The most one request made with it commits, in US dollars. |
-| `spendCap` | string (US dollars, decimal) | No | The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. |
+| `spendCap` | string (US dollars, decimal) | No | The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. |
 | `spendCapWindowSeconds` | integer | No | The rolling window spendCap counts over, in seconds. |
-| `spent` | string (US dollars, decimal) | No | What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its sandboxes' and those of every key made with it. Listed and updated keys only. |
+| `spent` | string (US dollars, decimal) | No | What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its machines' and those of every key made with it. Listed and updated keys only. |
 | `deletedAt` | string (RFC 3339) | No | When it was revoked: a delete's answer, its state `deleted`. |
 | `secret` | string | No | The key itself, to send as `Authorization: Bearer <secret>`; omitted for a key a device or an OAuth client collects. |
 | `redirectTo` | string | No | For an OAuth client's key: where to send the person, with the code the client exchanges for it. |
@@ -291,6 +292,6 @@ A change to a key: each field left out stays as it is.
 | --- | --- | --- | --- |
 | `name` | string | No | Its name. At least 1 character. At most 64 characters. |
 | `maxCost` | string (US dollars, decimal) | No | The most one request made with it may commit, in US dollars (`"5.00"`). Never more than a key it was made with, nor than the key that changes it: a key never raises its own caps. |
-| `spendCap` | string (US dollars, decimal) | No | The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it. |
+| `spendCap` | string (US dollars, decimal) | No | The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it. |
 | `spendCapWindowSeconds` | integer | No | The rolling window spendCap counts over, in seconds; kept when omitted, a day for a key that had no spendCap. At least 60. At most 2592000. |
 | `remove` | list of one of `maxCost`, `spendCap` | No | Caps to remove: `maxCost`, `spendCap`. The key is then held only by the caps of the keys it was made with and of its holder's grants. |

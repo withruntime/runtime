@@ -48,8 +48,8 @@ result = runtime.me.get()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.me.get
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.me.get
 ```
 
 ```bash title="CLI"
@@ -74,4 +74,4 @@ Who is calling: the key, the agent it is, the org it acts for, and what admits i
 | `projectName` | string | No | The project's name. |
 | `role` | string | No | The built-in role of the grant that admits it (owner, admin, developer, viewer, billing); none for an org's own role. |
 | `scope` | one of `org`, `project` | Yes | What a call that names no resource reaches: `org` (the whole organization) or `project` (the key's project alone). |
-| `billing` | one of `test`, `trial`, `live`, `grace`, `paused` | No | How the organization pays: `test` (no card yet: every call is answered, and nothing runs or is billed), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted). |
+| `billing` | one of `test`, `trial`, `live`, `grace`, `paused` | No | How the organization pays: `test` (no card yet: every call that creates or changes a machine, volume or address answers 402 `card_required`), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted). |

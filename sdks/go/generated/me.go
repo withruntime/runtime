@@ -29,7 +29,7 @@ type Me struct {
 	Role *string `json:"role,omitempty"`
 	// Scope What a call that names no resource reaches: `org` (the whole organization) or `project` (the key's project alone).
 	Scope string `json:"scope"`
-	// Billing How the organization pays: `test` (no card yet: every call is answered, and nothing runs or is billed), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted).
+	// Billing How the organization pays: `test` (no card yet: every call that creates or changes a machine, volume or address answers 402 `card_required`), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted).
 	Billing *string `json:"billing,omitempty"`
 }
 

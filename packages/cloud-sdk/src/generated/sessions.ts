@@ -46,18 +46,18 @@ export interface SessionCreated extends Session {
 
 /** A short-lived token a frontend holds to reach one machine directly: it reads the machine, runs its commands and processes, reads and writes its files, and signs its previews' links, and does nothing else. It acts as the key that made it and ends with that key. */
 export class Sessions {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Makes a session for one machine the caller reaches and returns its token this once. The token reads the machine, runs its commands and processes, reads and writes its files and signs its previews' links, and nothing else; it acts as the caller, lives `expiresInSeconds` (an hour unless asked, a day at most), never past the caller's key, and ends when that key is revoked. The API answers CORS for its calls, so a web page can make them. Sent again with the same Idempotency-Key and body, it makes none and returns 409 `conflict` with the session it made in `details.made`, without its token; with another body, 409 `idempotency_key_reused`. */
   create(input: SessionCreate, options?: RequestOptions): Promise<SessionCreated> {
-    return this.#t.request<SessionCreated>("POST", `/v2/sessions`, { body: input, options, idempotent: true });
+    return this.transport.request<SessionCreated>("POST", `/v2/sessions`, { body: input, options, idempotent: true });
   }
 
   /** Ends a session now: its next call is refused. Its maker ends its own; an owner or an admin, any of the organization's. Ended already, it returns 404. */
   delete(id: string, options?: RequestOptions): Promise<Session> {
-    return this.#t.request<Session>("DELETE", `/v2/sessions/${encodeURIComponent(id)}`, { options, idempotent: true });
+    return this.transport.request<Session>("DELETE", `/v2/sessions/${encodeURIComponent(id)}`, { options, idempotent: true });
   }
 }

@@ -26,6 +26,8 @@ type Event struct {
 	Reason *string `json:"reason,omitempty"`
 	// ExitCode The exit code of a run that ended.
 	ExitCode *int64 `json:"exitCode,omitempty"`
+	// PausedAt When the resource's pause began (or its run ended), on an event of it paused or stopped.
+	PausedAt *string `json:"pausedAt,omitempty"`
 	// CreatedAt When it happened.
 	CreatedAt string `json:"createdAt"`
 }
@@ -73,9 +75,9 @@ func (c *Events) List(ctx context.Context, q EventListQuery, opts *RequestOption
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Events) ListAll(ctx context.Context, q EventListQuery, opts *RequestOptions) iter.Seq2[Event, error] {
-	return all(func(cursor *string) (*Page[Event], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Event], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

@@ -118,9 +118,9 @@ class JobRuns:
         """Lists a job's runs, oldest first unless `order` is `newest`, deleted ones included while their records are kept."""
         return page(self._transport.request("GET", f"/v2/job-runs", query={"job": job, "order": order, "cursor": cursor, "limit": limit}, idempotent=True), JobRun.from_dict, lambda c: self.list(job=job, order=order, cursor=c, limit=limit))
 
-    def get(self, id: str) -> JobRun:
+    def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> JobRun:
         """Returns a run."""
-        return JobRun.from_dict(self._transport.request("GET", f"/v2/job-runs/{quote(id, safe='')}", idempotent=True))
+        return JobRun.from_dict(self._transport.request("GET", f"/v2/job-runs/{quote(id, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True))
 
     def output(self, id: str, *, cursor: Optional[int] = None, max_bytes: Optional[int] = None) -> JobRunOutput:
         """Returns a run's output after a cursor, stdout and stderr together in the order written, and the cursor to read on from. Its last 256 KiB are kept; truncated says when the cursor fell before them."""
@@ -137,9 +137,9 @@ class AsyncJobRuns:
         """Lists a job's runs, oldest first unless `order` is `newest`, deleted ones included while their records are kept."""
         return async_page(await self._transport.request("GET", f"/v2/job-runs", query={"job": job, "order": order, "cursor": cursor, "limit": limit}, idempotent=True), JobRun.from_dict, lambda c: self.list(job=job, order=order, cursor=c, limit=limit))
 
-    async def get(self, id: str) -> JobRun:
+    async def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> JobRun:
         """Returns a run."""
-        return JobRun.from_dict(await self._transport.request("GET", f"/v2/job-runs/{quote(id, safe='')}", idempotent=True))
+        return JobRun.from_dict(await self._transport.request("GET", f"/v2/job-runs/{quote(id, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True))
 
     async def output(self, id: str, *, cursor: Optional[int] = None, max_bytes: Optional[int] = None) -> JobRunOutput:
         """Returns a run's output after a cursor, stdout and stderr together in the order written, and the cursor to read on from. Its last 256 KiB are kept; truncated says when the cursor fell before them."""

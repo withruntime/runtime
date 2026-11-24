@@ -96,11 +96,11 @@ type ImageContext struct {
 
 // ImageBuild What an image's build runs on: a machine of its own, deleted once the build ends.
 type ImageBuild struct {
-	// Vcpu Its vCPUs. At least 1. At most 8. Default: 2.
+	// Vcpu Its vCPUs; a build machine's default when omitted. At least 1. At most 8.
 	Vcpu *int64 `json:"vcpu,omitempty"`
-	// MemoryGb Its memory in GB. At least 1. At most 16. Default: 4.
+	// MemoryGb Its memory in GB; a build machine's default when omitted. At least 1. At most 16.
 	MemoryGb *float64 `json:"memoryGB,omitempty"`
-	// DiskGb Its disk in GB: the base image, the earlier stages and the context. At least 4. At most 32. Default: 16.
+	// DiskGb Its disk in GB: the base image, the earlier stages and the context. A build machine's default when omitted, at least its image's size. At least 4. At most 32.
 	DiskGb *float64 `json:"diskGB,omitempty"`
 	// TimeoutSeconds Seconds the build may run before it fails. At least 60. At most 3600. Default: 1800.
 	TimeoutSeconds *int64 `json:"timeoutSeconds,omitempty"`
@@ -114,8 +114,10 @@ type ImageCreate struct {
 	Labels map[string]string `json:"labels,omitempty"`
 	// Tags Tags its name takes for it once it is ready; `latest` when it has a name and none is given. At most 16 items.
 	Tags []string `json:"tags,omitempty"`
-	// Image An OCI image to use as it is, from a public registry: `python:3.12-slim`, `ghcr.io/org/app:1`.
+	// Image An OCI image to use as it is: `python:3.12-slim`, `ghcr.io/org/app:1`. A private one is named by its digest, `repo@sha256:<64 hex digits>`, with `pullSecret`.
 	Image *string `json:"image,omitempty"`
+	// PullSecret The secret holding the registry login that pulls a private `image`: a hidden secret with header `Authorization`, format `Basic {value}`, its value the base64 of `username:token`, as its hosts the registry's token service (`auth.docker.io` for Docker Hub, the registry's own name for `ghcr.io`, `quay.io` and others), and as its scope `{"none": true}`, so no machine's requests carry it. Runtime's egress proxy signs in with it for this import's build machine alone, which never holds the login or a token. The caller needs the `secrets:use` permission.
+	PullSecret *string `json:"pullSecret,omitempty"`
 	// Dockerfile A Dockerfile: multi-stage builds, `ARG`, `COPY --from`, heredocs. `COPY` reads `files`.
 	Dockerfile *string `json:"dockerfile,omitempty"`
 	// Recipe Packages, files and commands, rendered into a Dockerfile. Not with `files` or `context`.
@@ -136,6 +138,10 @@ type ImageCreate struct {
 	Start *MachineStart `json:"start,omitempty"`
 	// Build What its build runs on.
 	Build *ImageBuild `json:"build,omitempty"`
+	// DeleteAfterSeconds Seconds until Runtime deletes this version, as its delete does: final, and it can't be undone; one an App boots is deleted once none does. 0 or omitted: kept until deleted. At least 0. At most 315360000.
+	DeleteAfterSeconds *int64 `json:"deleteAfterSeconds,omitempty"`
+	// DeleteProtection Whether this version's delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`.
+	DeleteProtection *bool `json:"deleteProtection,omitempty"`
 }
 
 // ImageLogLine One line of an image's build log.
@@ -162,6 +168,25 @@ type ImageLogs struct {
 	Truncated bool `json:"truncated"`
 	// Done Whether the build has ended: no line comes after these.
 	Done bool `json:"done"`
+}
+
+// ImageGetQuery is what Get takes in its query.
+type ImageGetQuery struct {
+	// Wait Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60.
+	Wait *float64
+	// IfState The state the caller last read, which `wait` waits for it to leave.
+	IfState *string
+}
+
+func (q ImageGetQuery) values() url.Values {
+	v := url.Values{}
+	if q.Wait != nil {
+		v.Set("wait", strconv.FormatFloat(*q.Wait, 'f', -1, 64))
+	}
+	if q.IfState != nil {
+		v.Set("ifState", *q.IfState)
+	}
+	return v
 }
 
 // ImageListQuery is what List takes in its query.
@@ -228,9 +253,9 @@ type Images struct {
 }
 
 // Get Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`).
-func (c *Images) Get(ctx context.Context, id string, opts *RequestOptions) (*Image, error) {
+func (c *Images) Get(ctx context.Context, id string, q ImageGetQuery, opts *RequestOptions) (*Image, error) {
 	out := new(Stored)
-	if err := c.t.Do(ctx, "GET", "/v2/images/"+url.PathEscape(id), nil, nil, Call{Idempotent: true}, opts, out); err != nil {
+	if err := c.t.Do(ctx, "GET", "/v2/images/"+url.PathEscape(id), q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
 	return newImage(c, out), nil
@@ -245,9 +270,9 @@ func (c *Images) List(ctx context.Context, q ImageListQuery, opts *RequestOption
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Images) ListAll(ctx context.Context, q ImageListQuery, opts *RequestOptions) iter.Seq2[Stored, error] {
-	return all(func(cursor *string) (*Page[Stored], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Stored], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
@@ -271,7 +296,7 @@ func (c *Images) Put(ctx context.Context, digest string, data []byte, opts *Requ
 	return out, nil
 }
 
-// Delete Deletes an image version. Sandboxes already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App.
+// Delete Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App.
 func (c *Images) Delete(ctx context.Context, id string, opts *RequestOptions) (*Stored, error) {
 	out := new(Stored)
 	if err := c.t.Do(ctx, "DELETE", "/v2/images/"+url.PathEscape(id), nil, nil, Call{}, opts, out); err != nil {
@@ -298,6 +323,15 @@ func (c *Images) Logs(ctx context.Context, id string, q ImageLogsQuery, opts *Re
 	return out, nil
 }
 
+// Update Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+func (c *Images) Update(ctx context.Context, id string, in StoredUpdate, opts *RequestOptions) (*Stored, error) {
+	out := new(Stored)
+	if err := c.t.Do(ctx, "POST", "/v2/images/"+url.PathEscape(id)+":update", nil, in, Call{Idempotent: true}, opts, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Image is one of images: What a machine boots: a root filesystem, its environment and its start.
 type Image struct {
 	c *Images
@@ -313,8 +347,12 @@ func newImage(c *Images, info *Stored) *Image {
 func (s *Image) ID() string { return s.Info.ID }
 
 // Refresh Returns an image, by its ID, its name (its newest version) or one of its tags (`name:tag`).
-func (s *Image) Refresh(ctx context.Context, opts *RequestOptions) error {
-	got, err := s.c.Get(ctx, s.Info.ID, opts)
+func (s *Image) Refresh(ctx context.Context, q *ImageGetQuery, opts *RequestOptions) error {
+	var qb ImageGetQuery
+	if q != nil {
+		qb = *q
+	}
+	got, err := s.c.Get(ctx, s.Info.ID, qb, opts)
 	if err != nil {
 		return err
 	}
@@ -322,7 +360,7 @@ func (s *Image) Refresh(ctx context.Context, opts *RequestOptions) error {
 	return nil
 }
 
-// Delete Deletes an image version. Sandboxes already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App.
+// Delete Deletes an image version. Machines already started from it keep running. One an App boots from is refused with image_in_use (409) naming the App.
 func (s *Image) Delete(ctx context.Context, opts *RequestOptions) (*Stored, error) {
 	return s.c.Delete(ctx, s.Info.ID, opts)
 }
@@ -334,4 +372,18 @@ func (s *Image) Logs(ctx context.Context, q *ImageLogsQuery, opts *RequestOption
 		qb = *q
 	}
 	return s.c.Logs(ctx, s.Info.ID, qb, opts)
+}
+
+// Update Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+func (s *Image) Update(ctx context.Context, in *StoredUpdate, opts *RequestOptions) error {
+	var b StoredUpdate
+	if in != nil {
+		b = *in
+	}
+	got, err := s.c.Update(ctx, s.Info.ID, b, opts)
+	if err != nil {
+		return err
+	}
+	s.Info = got
+	return nil
 }

@@ -1,6 +1,6 @@
 # Preview API reference
 
-A port of a sandbox at a public HTTPS address: private with a signed token, or public.
+A port of a machine at a public HTTPS address: private with a signed token, or public.
 
 Base URL: `https://api.withruntime.com`. [Authentication, idempotency and errors](./overview) work the same way for every product.
 
@@ -21,7 +21,7 @@ Its states: `making`, `ready`, `deleted`.
 
 `POST /v2/sandboxes/{id}/previews`
 
-Shares a port of a sandbox at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview.
+Shares a port of a machine at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview.
 
 Its action, for a key's grant: `previews:create`.
 
@@ -59,8 +59,8 @@ result = runtime.previews.create("PREVIEW_ID", port=3000)
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.previews.create("PREVIEW_ID", port: 3000)
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.previews.create("PREVIEW_ID", port: 3000)
 ```
 
 ```bash title="CLI"
@@ -75,7 +75,7 @@ runtime previews create PREVIEW_ID --port 3000
 
 `GET /v2/previews`
 
-Lists a sandbox's previews, lowest port first.
+Lists a machine's previews, lowest port first.
 
 Its action, for a key's grant: `previews:list`.
 
@@ -83,7 +83,7 @@ Query:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `sandboxId` | string | Yes | The sandbox whose previews to list. |
+| `sandboxId` | string | Yes | The machine whose previews to list. |
 | `cursor` | string | No | Where the page starts: a page's `next`. |
 | `limit` | integer | No | The most items the page holds. At least 1. At most 200. Default: 50. |
 
@@ -115,8 +115,8 @@ result = runtime.previews.list(sandbox_id="SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.previews.list(sandbox_id: "SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.previews.list(sandbox_id: "SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -136,6 +136,13 @@ Returns a preview; `sign` returns one with a token.
 Its action, for a key's grant: `previews:get`.
 
 Path: `name`.
+
+Query:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `wait` | number | No | Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. |
+| `ifState` | string | No | The state the caller last read, which `wait` waits for it to leave. |
 
 Returns a [Preview](#preview).
 
@@ -165,8 +172,8 @@ result = runtime.previews.get("example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.previews.get("example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.previews.get("example")
 ```
 
 ```bash title="CLI"
@@ -217,8 +224,8 @@ result = runtime.previews.sign("example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.previews.sign("example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.previews.sign("example")
 ```
 
 ```bash title="CLI"
@@ -263,8 +270,8 @@ result = runtime.previews.rotate("example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.previews.rotate("example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.previews.rotate("example")
 ```
 
 ```bash title="CLI"
@@ -309,8 +316,8 @@ result = runtime.previews.delete("example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.previews.delete("example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.previews.delete("example")
 ```
 
 ```bash title="CLI"
@@ -321,11 +328,11 @@ runtime previews delete example
 
 ### PreviewCreate
 
-A preview of the sandbox its path names to create, or its visibility and sites to change.
+A preview of the machine its path names to create, or its visibility and sites to change.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `port` | integer | Yes | The port inside the sandbox. At least 1. At most 65535. |
+| `port` | integer | Yes | The port inside the machine. At least 1. At most 65535. |
 | `visibility` | one of `private`, `public` | No | `private` (default): a token is needed. `public`: anyone with the address. |
 | `embedOrigins` | list of string | No | The sites that may show it in an iframe; omitted on one that exists, kept as it is; empty for any site. |
 | `ttlSeconds` | integer | No | The token's lifetime in seconds, from 60 until the calling key's own end (a year at most); a day when omitted, or the key's end when that is sooner. At least 60. At most 31536000. Default: 86400. |
@@ -337,9 +344,10 @@ A preview.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | string | Yes | Its ID. |
+| `name` | string | Yes | Its hostname, `<port>-<sandbox hex>.<domain>`: its own calls (`/v2/previews/{name}`) take it or its ID. |
 | `object` | one of `preview` | Yes | Always `preview`. |
-| `sandboxId` | string | Yes | The sandbox whose port it shares. |
-| `port` | integer | Yes | The port inside the sandbox. |
+| `sandboxId` | string | Yes | The machine whose port it shares. |
+| `port` | integer | Yes | The port inside the machine. |
 | `visibility` | one of `private`, `public` | Yes | `private` or `public`. |
 | `url` | string | Yes | Its address. A private one also needs the token. |
 | `state` | one of `making`, `ready`, `deleted` | Yes | Where it is: `ready` once every serving host routes it. |

@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** A private network: its sandboxes reach each other by name, over TCP. */
+/** A private network: its machines reach each other by name, over TCP. */
 public final class Networks {
   private final Transport t;
 
@@ -17,7 +17,7 @@ public final class Networks {
 
   /** A private network's settings, as it keeps them. */
   public static final class NetworkSettings {
-    /** The machines in it, by ID; none for every sandbox of the org. */
+    /** The machines in it, by ID; none for every machine of the org. */
     public List<String> members;
 
     public NetworkSettings members(List<String> v) {
@@ -41,7 +41,7 @@ public final class Networks {
 
   /** A private network: its members reach each other at `<id>.sandbox.internal`, over TCP. */
   public static final class Network {
-    /** The machines in it, by ID; none for every sandbox of the org. */
+    /** The machines in it, by ID; none for every machine of the org. */
     public List<String> members;
 
     /** Its ID. */

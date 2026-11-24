@@ -4,7 +4,21 @@
 import type { Page, RequestOptions, Transport } from "./runtime.js";
 import { Paginated } from "./runtime.js";
 
-/** A project: where sandboxes, storage, addresses and keys sit. */
+/** A project's own limits: each of its organization's plan limits set lower for it alone, never higher, by the price card's names and in its units. A start in it is held to both. One not set is its organization's. */
+export interface ProjectLimits {
+  /** The most vCPUs its machines run at once. At least 0. */
+  runningVcpu?: number;
+  /** The most memory its machines hold at once, in GiB. At least 0. */
+  runningMemoryGib?: number;
+  /** The most vCPUs one of its machines has. At least 0. */
+  machineVcpu?: number;
+  /** The most memory one of its machines has, in GiB. At least 0. */
+  machineMemoryGib?: number;
+  /** The most machines it starts a second. At least 0. */
+  newMachinesPerSecond?: number;
+}
+
+/** A project: where machines, storage, addresses and keys sit. */
 export interface Project {
   /** Its ID. */
   id: string;
@@ -20,12 +34,22 @@ export interface Project {
   state: "active" | "deleted" | (string & {});
   /** When it was deleted: a delete's answer, its state `deleted`. */
   deletedAt?: string;
+  /** Its own limits: those of its organization's plan limits set lower for it. One not set is its organization's. */
+  limits: ProjectLimits;
 }
 
 /** A new project. */
 export interface ProjectCreate {
   /** Its name, unique in the organization. At least 1 character. At most 64 characters. */
   name: string;
+  /** Its own limits ([`ProjectLimits`]); none, its organization's. */
+  limits?: ProjectLimits;
+}
+
+/** A project's own limits, set. */
+export interface ProjectLimitsSet {
+  /** Its limits, the whole set: each one given is set, each one left out is its organization's again. */
+  limits: ProjectLimits;
 }
 
 /** A new name; everything else stays as it is. */
@@ -40,30 +64,35 @@ export type ProjectListQuery = {
   limit?: number;
 };
 
-/** A project: where sandboxes, storage, addresses and keys sit, each in one. Every organization has a default project, where a call that names none acts. */
+/** A project: where machines, storage, addresses and keys sit, each in one. Every organization has a default project, where a call that names none acts. */
 export class Projects {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the organization's projects, the default first, then by name. */
-  list(query: ProjectListQuery = {}, options?: RequestOptions): Paginated<Project> {
-    return new Paginated<Project>((cursor) => this.#t.request<Page<Project>>("GET", `/v2/projects`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: ProjectListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Project> {
+    return new Paginated<Project>((cursor) => this.transport.request<Page<Project>>("GET", `/v2/projects`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 
-  /** Creates a project. A name another project has returns 409. Asked again with the same Idempotency-Key, it returns the same one. */
+  /** Creates a project, with its own limits when given. A name another project has returns 409; a limit above its organization's returns 400 `limit_above_org`. Asked again with the same Idempotency-Key, it returns the same one. */
   create(input: ProjectCreate, options?: RequestOptions): Promise<Project> {
-    return this.#t.request<Project>("POST", `/v2/projects`, { body: input, options, idempotent: true });
+    return this.transport.request<Project>("POST", `/v2/projects`, { body: input, options, idempotent: true });
+  }
+
+  /** Sets a project's own limits: each of its organization's plan limits set lower for it alone, by the price card's names. The whole set: a limit left out is its organization's again. One above its organization's returns 400 `limit_above_org`, naming the limit and both figures. Each start in the project is held to its limits and its organization's. */
+  limits(id: string, input: ProjectLimitsSet, options?: RequestOptions): Promise<Project> {
+    return this.transport.request<Project>("POST", `/v2/projects/${encodeURIComponent(id)}:limits`, { body: input, options, idempotent: true });
   }
 
   /** Renames a project; what is in it stays as it is. A name another project has returns 409. */
   update(id: string, input: Rename, options?: RequestOptions): Promise<Project> {
-    return this.#t.request<Project>("POST", `/v2/projects/${encodeURIComponent(id)}:update`, { body: input, options, idempotent: true });
+    return this.transport.request<Project>("POST", `/v2/projects/${encodeURIComponent(id)}:update`, { body: input, options, idempotent: true });
   }
 
-  /** Deletes a project and frees its name, with the grants, keys and invitations held to it. The caller needs `grants:delete` as well, as the grants go with it. The default project, or one that still holds a sandbox, storage or an address, returns 409. Deleted again, it returns 404. */
+  /** Deletes a project and frees its name, with the grants, keys and invitations held to it. The caller needs `grants:delete` as well, as the grants go with it. The default project, or one that still holds a machine, storage or an address, returns 409. Deleted again, it returns 404. */
   delete(id: string, options?: RequestOptions): Promise<Project> {
-    return this.#t.request<Project>("DELETE", `/v2/projects/${encodeURIComponent(id)}`, { options, idempotent: true });
+    return this.transport.request<Project>("DELETE", `/v2/projects/${encodeURIComponent(id)}`, { options, idempotent: true });
   }
 }

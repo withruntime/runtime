@@ -28,11 +28,11 @@ export interface Key {
   lastUsedAt?: string;
   /** The most one request made with it commits, in US dollars. */
   maxCost?: string;
-  /** The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. */
+  /** The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars. */
   spendCap?: string;
   /** The rolling window spendCap counts over, in seconds. */
   spendCapWindowSeconds?: number;
-  /** What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its sandboxes' and those of every key made with it. Listed and updated keys only. */
+  /** What it spent over spendCapWindowSeconds (the last 24 hours when it has no spendCap), in US dollars, as spendCap counts it: its machines' and those of every key made with it. Listed and updated keys only. */
   spent?: string;
   /** When it was revoked: a delete's answer, its state `deleted`. */
   deletedAt?: string;
@@ -58,11 +58,13 @@ export interface KeyCreate {
   projectId?: string;
   /** One of the organization's agents or CI pipelines it acts as, for the caller; the caller itself when omitted. */
   agentId?: string;
+  /** The actions it holds, each `product:action` as each call's reference page names it (`sandboxes:create`, `sandboxes:exec`), on every plan: it acts as an agent of its own granted exactly these, never more than its caller may do or spend, in every project its caller reaches (one held to one project, with projectId or by a caller that reaches one alone, starts at Growth), and its agent and role are deleted with it. Omitted, it holds every action its holder's grant allows, or, made with a key that has actions, those actions. Not with agentId. */
+  actions?: string[];
   /** Seconds until it stops working; never when omitted. At least 60. At most 31536000. */
   expiresInSeconds?: number;
   /** The most one request made with it may commit, in US dollars (`"5.00"`): one asking more is refused 403, and a create that names no maxCost gets this one. Made with a key that has one, at most that key's. */
   maxCost?: string;
-  /** The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running sandboxes may pass it. Made with a key that has one, at most that key's, and counted in it too. */
+  /** The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed: once reached, a create is refused 403 until the window passes it, and a create that names no maxCost gets what is left as its maxCost. Running machines may pass it. Made with a key that has one, at most that key's, and counted in it too. */
   spendCap?: string;
   /** The rolling window spendCap counts over, in seconds; a day when omitted. At least 60. At most 2592000. */
   spendCapWindowSeconds?: number;
@@ -86,7 +88,7 @@ export interface KeyUpdate {
   name?: string;
   /** The most one request made with it may commit, in US dollars (`"5.00"`). Never more than a key it was made with, nor than the key that changes it: a key never raises its own caps. */
   maxCost?: string;
-  /** The most the sandboxes made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it. */
+  /** The most the machines made with it, with those of every key made with it, may spend over spendCapWindowSeconds, in US dollars, as billed. Never more than a key it was made with, nor than the key that changes it. */
   spendCap?: string;
   /** The rolling window spendCap counts over, in seconds; kept when omitted, a day for a key that had no spendCap. At least 60. At most 2592000. */
   spendCapWindowSeconds?: number;
@@ -102,28 +104,28 @@ export type KeyListQuery = {
 
 /** An API key: what a program, an agent or a CI pipeline calls the API with, acting as the person or agent who made it and never reaching more. Its secret is shown once, when it is made. */
 export class Keys {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the organization's live keys, newest first, without their secrets: every key for an owner or an admin, the caller's own otherwise. */
-  list(query: KeyListQuery = {}, options?: RequestOptions): Paginated<Key> {
-    return new Paginated<Key>((cursor) => this.#t.request<Page<Key>>("GET", `/v2/keys`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: KeyListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Key> {
+    return new Paginated<Key>((cursor) => this.transport.request<Page<Key>>("GET", `/v2/keys`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 
   /** Makes a key that acts as the caller, or as one of the organization's agents for the caller, and returns its secret this once. With `userCode` or `authorization`, the key goes to the device or OAuth client that asked for it instead, which collects it once from `/v2/oauth/token`. A key made with a key works until its own end, never past that key's: it lives on when that key is revoked, so a key is rotated by making its next with it. */
   create(input: KeyCreate, options?: RequestOptions): Promise<KeyCreated> {
-    return this.#t.request<KeyCreated>("POST", `/v2/keys`, { body: input, options });
+    return this.transport.request<KeyCreated>("POST", `/v2/keys`, { body: input, options });
   }
 
   /** Renames a key, or sets or removes its caps (`maxCost`, `spendCap`); its secret stays as it is. A cap is never set above that of a key it was made with, nor above the caller's own key's, so a key never raises its own caps. An owner or an admin changes any key of the organization; everyone else, their own. */
   update(id: string, input: KeyUpdate = {}, options?: RequestOptions): Promise<Key> {
-    return this.#t.request<Key>("POST", `/v2/keys/${encodeURIComponent(id)}:update`, { body: input, options, idempotent: true });
+    return this.transport.request<Key>("POST", `/v2/keys/${encodeURIComponent(id)}:update`, { body: input, options, idempotent: true });
   }
 
   /** Revokes a key: refused from its next call, with the hand-off tokens made from it; a key made with it works on. An owner or an admin revokes any key of the organization; everyone else, their own. Revoked again, it returns 404. */
   delete(id: string, options?: RequestOptions): Promise<Key> {
-    return this.#t.request<Key>("DELETE", `/v2/keys/${encodeURIComponent(id)}`, { options, idempotent: true });
+    return this.transport.request<Key>("DELETE", `/v2/keys/${encodeURIComponent(id)}`, { options, idempotent: true });
   }
 }

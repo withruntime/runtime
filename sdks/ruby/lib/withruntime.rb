@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 require_relative "withruntime/version"
-require_relative "withruntime/generated/kit"
+require_relative "withruntime/generated/client"
 
 module Withruntime
-  Runtime = Generated::Runtime
+  Generated = self
 end

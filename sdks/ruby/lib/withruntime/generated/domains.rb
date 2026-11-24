@@ -5,148 +5,250 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # A custom domain to add, or to point at another sandbox or port.
-    # - +hostname+: The hostname, at most 253 characters.
-    # - +sandbox_id+: The sandbox to serve.
-    # - +port+: The port inside the sandbox, 1 to 65535.
-    DomainCreate = Struct.new(:hostname, :sandbox_id, :port, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A custom domain to add, or to point at another machine or port.
+  # - +hostname+: The hostname, at most 253 characters.
+  # - +sandbox_id+: The machine to serve.
+  # - +port+: The port inside the machine, 1 to 65535.
+  DomainCreate = Struct.new(:hostname, :sandbox_id, :port, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          hostname: h["hostname"],
-          sandbox_id: h["sandboxId"],
-          port: h["port"],
-        )
-      end
-
-      def to_wire
-        {
-          "hostname" => self.hostname,
-          "sandboxId" => self.sandbox_id,
-          "port" => self.port,
-        }.compact
-      end
+      new(
+        hostname: h["hostname"],
+        sandbox_id: h["sandboxId"],
+        port: h["port"],
+      )
     end
 
-    # A custom domain's settings, as it keeps them: the port it serves, and its proof of ownership as facts.
-    # - +port+: The port inside the sandbox. At least 1. At most 65535.
-    # - +token+: The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`.
-    # - +verified_at+: When the TXT record was last found to hold the token; none until it is.
-    # - +checked_at+: When the TXT record was last looked up.
-    # - +check_error+: What the last lookup found wrong; none when it proved the name.
-    DomainSettings = Struct.new(:port, :token, :verified_at, :checked_at, :check_error, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "hostname" => self.hostname,
+        "sandboxId" => self.sandbox_id,
+        "port" => self.port,
+      }.compact
+    end
+  end
 
-        new(
-          port: h["port"],
-          token: h["token"],
-          verified_at: h["verifiedAt"],
-          checked_at: h["checkedAt"],
-          check_error: h["checkError"],
-        )
-      end
+  # A custom domain's settings, as it keeps them: the port it serves, and its proof of ownership as facts.
+  # - +port+: The port inside the machine. At least 1. At most 65535.
+  # - +token+: The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`.
+  # - +verified_at+: When the TXT record was last found to hold the token; none until it is.
+  # - +checked_at+: When the TXT record was last looked up.
+  # - +check_error+: What the last lookup found wrong; none when it proved the name.
+  DomainSettings = Struct.new(:port, :token, :verified_at, :checked_at, :check_error, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "port" => self.port,
-          "token" => self.token,
-          "verifiedAt" => self.verified_at,
-          "checkedAt" => self.checked_at,
-          "checkError" => self.check_error,
-        }.compact
-      end
+      new(
+        port: h["port"],
+        token: h["token"],
+        verified_at: h["verifiedAt"],
+        checked_at: h["checkedAt"],
+        check_error: h["checkError"],
+      )
     end
 
-    # A custom domain: your own hostname serving a sandbox's port.
-    # - +port+: The port inside the sandbox. At least 1. At most 65535.
-    # - +token+: The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`.
-    # - +verified_at+: When the TXT record was last found to hold the token; none until it is.
-    # - +checked_at+: When the TXT record was last looked up.
-    # - +check_error+: What the last lookup found wrong; none when it proved the name.
-    # - +id+: Its ID.
-    # - +object+: Always `domain`.
-    # - +hostname+: The hostname, lower case.
-    # - +sandbox_id+: The sandbox it serves.
-    # - +state+: Its state: `ready` once every serving host routes it.
-    # - +disabled+: Turned off by Runtime.
-    # - +created_at+: When it was added.
-    # - +records+: The DNS records to set: the TXT record that proves the name, and the CNAME that sends visitors here.
-    # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
-    Domain = Struct.new(:port, :token, :verified_at, :checked_at, :check_error, :id, :object, :hostname, :sandbox_id, :state, :disabled, :created_at, :records, :deleted_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "port" => self.port,
+        "token" => self.token,
+        "verifiedAt" => self.verified_at,
+        "checkedAt" => self.checked_at,
+        "checkError" => self.check_error,
+      }.compact
+    end
+  end
 
-        new(
-          port: h["port"],
-          token: h["token"],
-          verified_at: h["verifiedAt"],
-          checked_at: h["checkedAt"],
-          check_error: h["checkError"],
-          id: h["id"],
-          object: h["object"],
-          hostname: h["hostname"],
-          sandbox_id: h["sandboxId"],
-          state: h["state"],
-          disabled: h["disabled"],
-          created_at: h["createdAt"],
-          records: h["records"],
-          deleted_at: h["deletedAt"],
-        )
-      end
+  # A custom domain: your own hostname serving a machine's port.
+  # - +port+: The port inside the machine. At least 1. At most 65535.
+  # - +token+: The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`.
+  # - +verified_at+: When the TXT record was last found to hold the token; none until it is.
+  # - +checked_at+: When the TXT record was last looked up.
+  # - +check_error+: What the last lookup found wrong; none when it proved the name.
+  # - +id+: Its ID.
+  # - +object+: Always `domain`.
+  # - +hostname+: The hostname, lower case.
+  # - +sandbox_id+: The machine it serves.
+  # - +state+: Its state: `ready` once every serving host routes it.
+  # - +disabled+: Turned off by Runtime.
+  # - +created_at+: When it was added.
+  # - +records+: The DNS records to set: the TXT record that proves the name, and the CNAME that sends visitors here.
+  # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
+  DomainInfo = Struct.new(:port, :token, :verified_at, :checked_at, :check_error, :id, :object, :hostname, :sandbox_id, :state, :disabled, :created_at, :records, :deleted_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "port" => self.port,
-          "token" => self.token,
-          "verifiedAt" => self.verified_at,
-          "checkedAt" => self.checked_at,
-          "checkError" => self.check_error,
-          "id" => self.id,
-          "object" => self.object,
-          "hostname" => self.hostname,
-          "sandboxId" => self.sandbox_id,
-          "state" => self.state,
-          "disabled" => self.disabled,
-          "createdAt" => self.created_at,
-          "records" => self.records,
-          "deletedAt" => self.deleted_at,
-        }.compact
-      end
+      new(
+        port: h["port"],
+        token: h["token"],
+        verified_at: h["verifiedAt"],
+        checked_at: h["checkedAt"],
+        check_error: h["checkError"],
+        id: h["id"],
+        object: h["object"],
+        hostname: h["hostname"],
+        sandbox_id: h["sandboxId"],
+        state: h["state"],
+        disabled: h["disabled"],
+        created_at: h["createdAt"],
+        records: h["records"],
+        deleted_at: h["deletedAt"],
+      )
     end
 
-    # Your own hostname serving a sandbox's port, with HTTPS.
-    class Domains
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "port" => self.port,
+        "token" => self.token,
+        "verifiedAt" => self.verified_at,
+        "checkedAt" => self.checked_at,
+        "checkError" => self.check_error,
+        "id" => self.id,
+        "object" => self.object,
+        "hostname" => self.hostname,
+        "sandboxId" => self.sandbox_id,
+        "state" => self.state,
+        "disabled" => self.disabled,
+        "createdAt" => self.created_at,
+        "records" => self.records,
+        "deletedAt" => self.deleted_at,
+      }.compact
+    end
+  end
 
-      # Adds a hostname to serve a sandbox's port, checks its TXT record, and returns the DNS records to set. Asked again with another sandbox or port, it points the name there.
-      def create(hostname:, sandbox_id:, port:, idempotency_key: nil)
-        Domain.from(@transport.request("POST", "/v2/domains", body: { "hostname" => hostname, "sandboxId" => sandbox_id, "port" => port }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+  # One of domains: Your own hostname serving a machine's port, with HTTPS.
+  class Domain
+    # What it was when last read, and what is under it.
+    attr_reader :info
 
-      # Lists the org's custom domains, by hostname.
-      def list(cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/domains", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Domain.from(i) }
-      end
+    def initialize(client, info)
+      @c = client
+      @info = info
+    end
 
-      # Returns a custom domain and the DNS records it needs.
-      def get(hostname)
-        Domain.from(@transport.request("GET", "/v2/domains/#{URI.encode_www_form_component(hostname)}", idempotent: true))
-      end
+    # Its hostname.
+    def hostname
+      @info.hostname
+    end
 
-      # Checks the TXT record now; the name is served once it matches.
-      def verify(hostname, idempotency_key: nil)
-        Domain.from(@transport.request("POST", "/v2/domains/#{URI.encode_www_form_component(hostname)}:verify", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Its id.
+    def id
+      @info.id
+    end
 
-      # Stops serving the hostname. Remove its DNS records too.
-      def delete(hostname, idempotency_key: nil)
-        Domain.from(@transport.request("DELETE", "/v2/domains/#{URI.encode_www_form_component(hostname)}", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # The port inside the machine.
+    def port
+      @info.port
+    end
+
+    # The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`.
+    def token
+      @info.token
+    end
+
+    # When the TXT record was last found to hold the token; none until it is.
+    def verified_at
+      @info.verified_at
+    end
+
+    # When the TXT record was last looked up.
+    def checked_at
+      @info.checked_at
+    end
+
+    # What the last lookup found wrong; none when it proved the name.
+    def check_error
+      @info.check_error
+    end
+
+    # Always `domain`.
+    def object
+      @info.object
+    end
+
+    # The machine it serves.
+    def sandbox_id
+      @info.sandbox_id
+    end
+
+    # Its state: `ready` once every serving host routes it.
+    def state
+      @info.state
+    end
+
+    # Turned off by Runtime.
+    def disabled
+      @info.disabled
+    end
+
+    # When it was added.
+    def created_at
+      @info.created_at
+    end
+
+    # The DNS records to set: the TXT record that proves the name, and the CNAME that sends visitors here.
+    def records
+      @info.records
+    end
+
+    # When it was deleted: a delete's answer, its state `deleted`.
+    def deleted_at
+      @info.deleted_at
+    end
+
+    def inspect
+      "#<Domain #{@info.inspect}>"
+    end
+
+    # Returns a custom domain and the DNS records it needs.
+    def refresh(wait: nil, if_state: nil)
+      @info = @c.get(@info.hostname, wait: wait, if_state: if_state).info
+      self
+    end
+
+    # Checks the TXT record now; the name is served once it matches.
+    def verify(idempotency_key: nil)
+      @info = @c.verify(@info.hostname, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Stops serving the hostname. Remove its DNS records too.
+    def delete(idempotency_key: nil)
+      @c.delete(@info.hostname, idempotency_key: idempotency_key)
+    end
+  end
+
+  # Your own hostname serving a machine's port, with HTTPS.
+  class Domains
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Adds a hostname to serve a machine's port, checks its TXT record, and returns the DNS records to set. Asked again with another machine or port, it points the name there.
+    def create(hostname:, sandbox_id:, port:, idempotency_key: nil)
+      Domain.new(self, DomainInfo.from(@transport.request("POST", "/v2/domains", body: { "hostname" => hostname, "sandboxId" => sandbox_id, "port" => port }.compact, idempotency_key: idempotency_key, idempotent: true)))
+    end
+
+    # Lists the org's custom domains, by hostname.
+    def list(cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/domains", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| DomainInfo.from(i) }
+    end
+
+    # Returns a custom domain and the DNS records it needs.
+    def get(hostname, wait: nil, if_state: nil)
+      Domain.new(self, DomainInfo.from(@transport.request("GET", "/v2/domains/#{URI.encode_www_form_component(hostname)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true)))
+    end
+
+    # Checks the TXT record now; the name is served once it matches.
+    def verify(hostname, idempotency_key: nil)
+      DomainInfo.from(@transport.request("POST", "/v2/domains/#{URI.encode_www_form_component(hostname)}:verify", idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Stops serving the hostname. Remove its DNS records too.
+    def delete(hostname, idempotency_key: nil)
+      DomainInfo.from(@transport.request("DELETE", "/v2/domains/#{URI.encode_www_form_component(hostname)}", idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

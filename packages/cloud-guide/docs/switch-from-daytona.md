@@ -24,7 +24,7 @@ finally:
     runtime.sandboxes.delete(sandbox.id)
 ```
 
-A stopped Daytona sandbox restarts with an empty memory; a paused Runtime sandbox resumes with its programs still running, and costs only its storage, $0.18 per GB-month, while paused.
+A stopped Daytona sandbox restarts with an empty memory; a paused Runtime sandbox resumes with its programs still running, and costs only its storage, $0.18 per GiB-month, while paused.
 
 ## Give this to your agent
 

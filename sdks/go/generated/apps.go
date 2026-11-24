@@ -305,9 +305,9 @@ func (c *Apps) List(ctx context.Context, q AppListQuery, opts *RequestOptions) (
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Apps) ListAll(ctx context.Context, q AppListQuery, opts *RequestOptions) iter.Seq2[SandboxInfo, error] {
-	return all(func(cursor *string) (*Page[SandboxInfo], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[SandboxInfo], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
@@ -389,6 +389,15 @@ func (c *Apps) WriteProcess(ctx context.Context, id string, process string, in P
 func (c *Apps) SignalProcess(ctx context.Context, id string, process string, in ProcessSignal, opts *RequestOptions) (*Process, error) {
 	out := new(Process)
 	if err := c.t.Do(ctx, "POST", "/v2/apps/"+url.PathEscape(id)+"/processes/"+url.PathEscape(process)+":signal", nil, in, Call{Idempotent: true}, opts, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ResizeProcess Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe.
+func (c *Apps) ResizeProcess(ctx context.Context, id string, process string, in Terminal, opts *RequestOptions) (*Process, error) {
+	out := new(Process)
+	if err := c.t.Do(ctx, "POST", "/v2/apps/"+url.PathEscape(id)+"/processes/"+url.PathEscape(process)+":resize", nil, in, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -565,7 +574,7 @@ func (c *Apps) Snapshot(ctx context.Context, id string, in SnapshotRequest, opts
 	return out, nil
 }
 
-// Update Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412.
+// Update Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused.
 func (c *Apps) Update(ctx context.Context, id string, in MachineUpdate, opts *RequestOptions) (*SandboxInfo, error) {
 	out := new(SandboxInfo)
 	if err := c.t.Do(ctx, "POST", "/v2/apps/"+url.PathEscape(id)+":update", nil, in, Call{}, opts, out); err != nil {
@@ -772,6 +781,15 @@ func (g *AppProcesses) Signal(ctx context.Context, process string, in *ProcessSi
 	return g.c.SignalProcess(ctx, g.id, process, b, opts)
 }
 
+// Resize Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe.
+func (g *AppProcesses) Resize(ctx context.Context, process string, in *Terminal, opts *RequestOptions) (*Process, error) {
+	var b Terminal
+	if in != nil {
+		b = *in
+	}
+	return g.c.ResizeProcess(ctx, g.id, process, b, opts)
+}
+
 // List Lists an app's processes, newest first: those running and those that ended lately.
 func (g *AppProcesses) List(ctx context.Context, opts *RequestOptions) (*ProcessList, error) {
 	return g.c.ListProcesses(ctx, g.id, opts)
@@ -801,10 +819,10 @@ func (g *AppNetwork) Set(ctx context.Context, in *NetworkRules, opts *RequestOpt
 type App struct {
 	c *Apps
 	// Info is what it was when last read.
-	Info *SandboxInfo
-	Files *AppFiles
+	Info      *SandboxInfo
+	Files     *AppFiles
 	Processes *AppProcesses
-	Network *AppNetwork
+	Network   *AppNetwork
 }
 
 func newApp(c *Apps, info *SandboxInfo) *App {
@@ -892,7 +910,7 @@ func (s *App) Snapshot(ctx context.Context, in *SnapshotRequest, opts *RequestOp
 	return s.c.Snapshot(ctx, s.Info.ID, b, opts)
 }
 
-// Update Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412.
+// Update Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused.
 func (s *App) Update(ctx context.Context, in *MachineUpdate, opts *RequestOptions) error {
 	var b MachineUpdate
 	if in != nil {

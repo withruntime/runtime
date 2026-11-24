@@ -20,6 +20,8 @@ export interface Event {
   reason?: string;
   /** The exit code of a run that ended. */
   exitCode?: number;
+  /** When the resource's pause began (or its run ended), on an event of it paused or stopped. */
+  pausedAt?: string;
   /** When it happened. */
   createdAt: string;
 }
@@ -36,13 +38,13 @@ export type EventListQuery = {
 
 /** What changed in the organization, as it changed: each event a webhook or an OpenTelemetry export is sent, kept 14 days. */
 export class Events {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the organization's lifecycle events of the last 14 days, newest first, paginated: each one a webhook is sent, with the same `id` and `type`. */
-  list(query: EventListQuery = {}, options?: RequestOptions): Paginated<Event> {
-    return new Paginated<Event>((cursor) => this.#t.request<Page<Event>>("GET", `/v2/events`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: EventListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Event> {
+    return new Paginated<Event>((cursor) => this.transport.request<Page<Event>>("GET", `/v2/events`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 }

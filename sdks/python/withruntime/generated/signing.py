@@ -272,5 +272,8 @@ def authorize(key: str, project: Optional[str], method: str, target: str, body: 
     project. Call it for each attempt: the server takes a nonce once."""
     signing = signing_key_for(key, project)
     if signing is None:
-        return {"Authorization": f"Bearer {key}"}
+        # The project goes with every call, a bearer key's too: a key that
+        # reaches the whole org would otherwise list, change and delete in
+        # every project.
+        return {"Authorization": f"Bearer {key}", **({"Runtime-Project": project} if project else {})}
     return signing.sign_request(project or "", method, target, body, idempotency_key=idempotency_key)

@@ -8,181 +8,228 @@ require "uri"
 require_relative "../signing"
 
 module Withruntime
-  module Generated
-    # The API version this client is written for, sent as Runtime-Version.
-    API_VERSION = "2026-10-27"
+  # The API version this client is written for, sent as Runtime-Version.
+  API_VERSION = "2026-10-27"
 
-    # The answers sent again after a wait (the spec's calls::RETRIES): status,
-    # code (nil: any), and whether only when the answer names its wait.
-    RETRIES = [[429, "rate_limited", true], [503, "unavailable", false], [503, "capacity_unavailable", false]].freeze
+  # The answers sent again after a wait (the spec's calls::RETRIES): status,
+  # code (nil: any), and whether only when the answer names its wait.
+  RETRIES = [[429, "rate_limited", true], [503, "unavailable", false], [503, "capacity_unavailable", false]].freeze
 
-    # The most times a request is sent again.
-    MAX_RETRIES = 3
+  # The most times a request is sent again.
+  MAX_RETRIES = 3
 
-    # The longest wait, in ms, a retry sleeps on: a refusal that names a
-    # longer one is raised at once, with its retry_after_ms.
-    LONGEST_WAIT_MS = 60000
+  # The longest wait, in ms, a retry sleeps on: a refusal that names a
+  # longer one is raised at once, with its retry_after_ms.
+  LONGEST_WAIT_MS = 60000
 
-    # How long a call waits for its answer, in ms, when it runs for no time
-    # its caller names; one that does waits that plus WAIT_MARGIN_MS.
-    CALL_TIMEOUT_MS = 60000
-    WAIT_MARGIN_MS = 10000
+  # How long a call waits for its answer, in ms, when it runs for no time
+  # its caller names; one that does waits that plus WAIT_MARGIN_MS.
+  CALL_TIMEOUT_MS = 60000
+  WAIT_MARGIN_MS = 10000
 
-    # The reason a run's answer was cut while the run goes on: followed on
-    # under the same key.
-    RUN_GOES_ON = "run_goes_on"
+  # The reason a run's answer was cut while the run goes on: followed on
+  # under the same key.
+  RUN_GOES_ON = "run_goes_on"
 
-    # An error the API returned: its body's code, message and request ID,
-    # the answer's status, and whether it is sent again (the spec's retries).
-    class ApiError < StandardError
-      attr_reader :code, :status, :request_id, :retryable, :retry_after_ms
+  # An error the API returned: its body's code, message and request ID,
+  # the answer's status, and whether it is sent again (the spec's retries).
+  class ApiError < StandardError
+    attr_reader :code, :status, :request_id, :retryable, :retry_after_ms
 
-      def initialize(status:, code:, message:, request_id:, retry_after_ms:)
-        super(message.to_s)
-        @code = code
-        @status = status
-        @request_id = request_id
-        @retry_after_ms = retry_after_ms
-        @retryable = RETRIES.any? { |s, c, w| s == status && (c.nil? || c == code) && (!retry_after_ms.nil? || !w) }
+    def initialize(status:, code:, message:, request_id:, retry_after_ms:)
+      super(message.to_s)
+      @code = code
+      @status = status
+      @request_id = request_id
+      @retry_after_ms = retry_after_ms
+      @retryable = RETRIES.any? { |s, c, w| s == status && (c.nil? || c == code) && (!retry_after_ms.nil? || !w) }
+    end
+  end
+
+  # What every list returns: a page of its items, and where the next page
+  # starts (the next call's cursor) when there is one.
+  Page = Struct.new(:items, :next, keyword_init: true)
+
+  def self.page(h)
+    Page.new(items: (h["items"] || []).map { |i| yield i }, next: h["next"])
+  end
+
+  # A stream (the spec's +streams+): what a started thing writes, read on
+  # from a cursor as it is written. +each+ yields each chunk; +wait+ reads it
+  # to its end and returns the thing as it ended.
+  class Stream
+    include Enumerable
+
+    def initialize(start, read, ended)
+      @start = start
+      @read = read
+      @ended = ended
+      @thing = nil
+      @done = false
+    end
+
+    # The thing as it started (a process: its ID).
+    def started
+      @thing ||= @start.call
+    end
+
+    def each
+      return enum_for(:each) unless block_given?
+
+      thing = started
+      cursor = 0
+      until @done
+        items, cursor, now = @read.call(thing, cursor)
+        thing = now || thing
+        @thing = thing
+        items.each { |i| yield i }
+        @done = true if @ended.call(thing, cursor)
       end
     end
 
-    # What every list returns: a page of its items, and where the next page
-    # starts (the next call's cursor) when there is one.
-    Page = Struct.new(:items, :next, keyword_init: true)
+    # Reads it to its end, and returns the thing as it ended (a process: its exit code).
+    def wait
+      each { |_| nil }
+      started
+    end
+  end
 
-    def self.page(h)
-      Page.new(items: (h["items"] || []).map { |i| yield i }, next: h["next"])
+  # HTTP, retries and errors, shared by every product's client.
+  class Transport
+    # +api_key+: a bearer key, or a key pair's rtsk_ secret, which signs each
+    # request for +project+ (default RUNTIME_PROJECT) and is never sent.
+    def initialize(api_key: nil, base_url: nil, max_retries: MAX_RETRIES, project: nil)
+      @api_key = api_key || ENV["RUNTIME_API_KEY"]
+      @project = project || ENV["RUNTIME_PROJECT"]
+      @base_url = (base_url || ENV["RUNTIME_API_URL"] || "https://api.withruntime.com").chomp("/")
+      @max_retries = max_retries
     end
 
-    # HTTP, retries and errors, shared by every product's client.
-    class Transport
-      # +api_key+: a bearer key, or a key pair's rtsk_ secret, which signs each
-      # request for +project+ (default RUNTIME_PROJECT) and is never sent.
-      def initialize(api_key: nil, base_url: nil, max_retries: MAX_RETRIES, project: nil)
-        @api_key = api_key || ENV["RUNTIME_API_KEY"]
-        @project = project || ENV["RUNTIME_PROJECT"]
-        @base_url = (base_url || ENV["RUNTIME_API_URL"] || "https://api.withruntime.com").chomp("/")
-        @max_retries = max_retries
-      end
+    # Never its key: inspecting a client, a group or a handle (irb, p, a logger) shows no secret.
+    def inspect
+      "#<#{self.class.name} #{@base_url}>"
+    end
 
-      # Sent again after a lost connection or a timeout only when +idempotent+.
-      # A verb that +runs+ is waited on as long as it may (+runs_seconds+) and a
-      # margin, or to its end when that is nil or 0: its answer begins at once with
-      # a space a read, so each read of it waits CALL_TIMEOUT_MS at most.
-      def request(method, path, query: nil, body: nil, idempotency_key: nil, data: nil, raw: false, idempotent: false, runs: false, runs_seconds: nil)
-        timeout = runs && runs_seconds.to_f.positive? ? runs_seconds + WAIT_MARGIN_MS / 1000.0 : CALL_TIMEOUT_MS / 1000.0
-        uri = URI(@base_url + path)
-        q = (query || {}).reject { |_, v| v.nil? }
-        uri.query = URI.encode_www_form(q) unless q.empty?
-        headers = { "accept" => raw ? "application/octet-stream" : "application/json", "runtime-version" => API_VERSION }
-        # A malformed key pair's secret, or one with no project, is refused here.
-        ::WithRuntime::Signing.key_for(@api_key, @project) if @api_key
-        headers["idempotency-key"] = idempotency_key || SecureRandom.uuid unless method == "GET"
-        if !data.nil?
-          headers["content-type"] = "application/octet-stream"
-        elsif !body.nil?
-          data = JSON.generate(body)
-          headers["content-type"] = "application/json"
-        end
-        attempt = 0
-        loop do
-          backoff = [2.0, 0.1 * (2**attempt)].min
-          begin
-            # Each attempt authorized anew: a key pair signs it, as the server
-            # takes a nonce once.
-            auth = @api_key ? ::WithRuntime::Signing.authorize(@api_key, @project, method, uri.request_uri, data, idempotency_key: headers["idempotency-key"]) : {}
-            res = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
-                                  open_timeout: timeout, read_timeout: timeout, write_timeout: timeout) do |http|
-              http.send_request(method, uri.request_uri, data, headers.merge(auth))
-            end
-          rescue SystemCallError, IOError, Timeout::Error
-            raise if !idempotent || attempt >= @max_retries
-            sleep(backoff)
-            attempt += 1
-            next
+    def pretty_print(q)
+      q.text(inspect)
+    end
+
+    # Sent again after a lost connection or a timeout only when +idempotent+.
+    # A verb that +runs+ is waited on as long as it may (+runs_seconds+) and a
+    # margin, or to its end when that is nil or 0: its answer begins at once with
+    # a space a read, so each read of it waits CALL_TIMEOUT_MS at most.
+    def request(method, path, query: nil, body: nil, idempotency_key: nil, data: nil, raw: false, idempotent: false, runs: false, runs_seconds: nil)
+      timeout = runs && runs_seconds.to_f.positive? ? runs_seconds + WAIT_MARGIN_MS / 1000.0 : CALL_TIMEOUT_MS / 1000.0
+      uri = URI(@base_url + path)
+      q = (query || {}).reject { |_, v| v.nil? }
+      uri.query = URI.encode_www_form(q) unless q.empty?
+      headers = { "accept" => raw ? "application/octet-stream" : "application/json", "runtime-version" => API_VERSION }
+      # A malformed key pair's secret, or one with no project, is refused here.
+      ::WithRuntime::Signing.key_for(@api_key, @project) if @api_key
+      headers["idempotency-key"] = idempotency_key || SecureRandom.uuid unless method == "GET"
+      if !data.nil?
+        headers["content-type"] = "application/octet-stream"
+      elsif !body.nil?
+        data = JSON.generate(body)
+        headers["content-type"] = "application/json"
+      end
+      attempt = 0
+      loop do
+        backoff = [2.0, 0.1 * (2**attempt)].min
+        begin
+          # Each attempt authorized anew: a key pair signs it, as the server
+          # takes a nonce once.
+          auth = @api_key ? ::WithRuntime::Signing.authorize(@api_key, @project, method, uri.request_uri, data, idempotency_key: headers["idempotency-key"]) : {}
+          res = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
+                                open_timeout: timeout, read_timeout: timeout, write_timeout: timeout) do |http|
+            http.send_request(method, uri.request_uri, data, headers.merge(auth))
           end
-          code = res.code.to_i
-          return res.body.to_s.b if code < 300 && raw
-          answer = code < 300 && !(res.body.nil? || res.body.empty?) ? JSON.parse(res.body) : nil
-          # A run's answer begins at once, so an error after that is in its body.
-          said = runs && answer.is_a?(Hash) && answer["error"].is_a?(Hash) ? answer["error"] : nil
-          return answer if code < 300 && said.nil?
-          err = said || begin
-            JSON.parse(res.body)["error"]
-          rescue StandardError
-            nil
-          end
-          err = {} unless err.is_a?(Hash)
-          after = res["retry-after"].to_s
-          error = ApiError.new(
-            status: said ? (said["status"] || 503).to_i : code,
-            code: err["code"] || "http_#{code}",
-            message: err["message"] || res.body.to_s,
-            request_id: err["requestId"] || res["request-id"].to_s,
-            retry_after_ms: after.match?(/\A\d+\z/) ? after.to_i * 1000 : nil
-          )
-          # A run whose answer a release cut goes on: followed on under the
-          # same key, its retries counted afresh, so releases mid-run spend none.
-          attempt = -1 if said && said["details"].is_a?(Hash) && said["details"]["reason"] == RUN_GOES_ON
-          # A longer wait than LONGEST_WAIT_MS (a daily cap) is the caller's
-          # to schedule: raised at once.
-          wait = error.retry_after_ms ? error.retry_after_ms / 1000.0 : backoff
-          if error.retryable && attempt < @max_retries && wait * 1000 <= LONGEST_WAIT_MS
-            sleep(wait)
-            attempt += 1
-            next
-          end
-          raise error
+        rescue SystemCallError, IOError, Timeout::Error
+          raise if !idempotent || attempt >= @max_retries
+          sleep(backoff)
+          attempt += 1
+          next
         end
-      end
-    end
-
-    # Every route an OpenAPI document of this API names, by "product.verb":
-    # how a verb newer than this SDK is found in the API's served one.
-    def self.routes_of(doc)
-      out = {}
-      (doc && doc["paths"] || {}).each do |path, methods|
-        methods.each do |method, op|
-          next unless op.is_a?(Hash) && op["operationId"].is_a?(String)
-          params = op["parameters"] || []
-          content = (op["requestBody"] || {})["content"] || {}
-          ok = ((op["responses"] || {})["200"] || {})["content"] || {}
-          runs = op["x-runs"]
-          out[op["operationId"]] = {
-            "method" => method.upcase, "path" => path,
-            "params" => params.select { |p| p["in"] == "path" }.map { |p| p["name"] },
-            "query" => params.select { |p| p["in"] == "query" }.map { |p| p["name"] },
-            "body" => content.key?("application/json") ? "json" : (content.key?("application/octet-stream") ? "bytes" : "none"),
-            "raw" => ok.key?("application/octet-stream"), "idempotent" => op["x-idempotent"] == true,
-            "runs" => runs ? runs["field"] : nil
-          }
+        code = res.code.to_i
+        return res.body.to_s.b if code < 300 && raw
+        answer = code < 300 && !(res.body.nil? || res.body.empty?) ? JSON.parse(res.body) : nil
+        # A run's answer begins at once, so an error after that is in its body.
+        said = runs && answer.is_a?(Hash) && answer["error"].is_a?(Hash) ? answer["error"] : nil
+        return answer if code < 300 && said.nil?
+        err = said || begin
+          JSON.parse(res.body)["error"]
+        rescue StandardError
+          nil
         end
+        err = {} unless err.is_a?(Hash)
+        after = res["retry-after"].to_s
+        error = ApiError.new(
+          status: said ? (said["status"] || 503).to_i : code,
+          code: err["code"] || "http_#{code}",
+          message: err["message"] || res.body.to_s,
+          request_id: err["requestId"] || res["request-id"].to_s,
+          retry_after_ms: after.match?(/\A\d+\z/) ? after.to_i * 1000 : nil
+        )
+        # A run whose answer a release cut goes on: followed on under the
+        # same key, its retries counted afresh, so releases mid-run spend none.
+        attempt = -1 if said && said["details"].is_a?(Hash) && said["details"]["reason"] == RUN_GOES_ON
+        # A longer wait than LONGEST_WAIT_MS (a daily cap) is the caller's
+        # to schedule: raised at once.
+        wait = error.retry_after_ms ? error.retry_after_ms / 1000.0 : backoff
+        if error.retryable && attempt < @max_retries && wait * 1000 <= LONGEST_WAIT_MS
+          sleep(wait)
+          attempt += 1
+          next
+        end
+        raise error
       end
-      out
     end
+  end
 
-    # A verb's call from its arguments by name: its path's parts, its
-    # query's fields, and the rest its body ("data", bytes or base64, for a
-    # verb whose body is bytes).
-    def self.call_route(transport, route, args, idempotency_key: nil)
-      rest = args.transform_keys(&:to_s).compact
-      path = route["path"].dup
-      route["params"].each do |p|
-        raise ArgumentError, "#{p} is required." unless rest.key?(p)
-        path = path.sub("{#{p}}", URI.encode_www_form_component(rest.delete(p).to_s))
+  # Every route an OpenAPI document of this API names, by "product.verb":
+  # how a verb newer than this SDK is found in the API's served one.
+  def self.routes_of(doc)
+    out = {}
+    (doc && doc["paths"] || {}).each do |path, methods|
+      methods.each do |method, op|
+        next unless op.is_a?(Hash) && op["operationId"].is_a?(String)
+        params = op["parameters"] || []
+        content = (op["requestBody"] || {})["content"] || {}
+        ok = ((op["responses"] || {})["200"] || {})["content"] || {}
+        runs = op["x-runs"]
+        out[op["operationId"]] = {
+          "method" => method.upcase, "path" => path,
+          "params" => params.select { |p| p["in"] == "path" }.map { |p| p["name"] },
+          "query" => params.select { |p| p["in"] == "query" }.map { |p| p["name"] },
+          "body" => content.key?("application/json") ? "json" : (content.key?("application/octet-stream") ? "bytes" : "none"),
+          "raw" => ok.key?("application/octet-stream"), "idempotent" => op["x-idempotent"] == true,
+          "runs" => runs ? runs["field"] : nil
+        }
       end
-      query = route["query"].each_with_object({}) { |q, h| h[q] = rest.delete(q) if rest.key?(q) }
-      data = nil
-      if route["body"] == "bytes"
-        d = rest.delete("data")
-        data = d.is_a?(String) && d.encoding != Encoding::BINARY ? d.unpack1("m") : d
-      end
-      runs = route["runs"]
-      # A verb that runs waits as long as its field says, or to its end when it is left out.
-      runs_seconds = runs && !rest[runs].nil? ? Float(rest[runs]) : nil
-      transport.request(route["method"], path, query: query.empty? ? nil : query, body: route["body"] == "json" ? rest : nil,
-                        data: data, raw: route["raw"], idempotency_key: idempotency_key, idempotent: route["idempotent"], runs: !runs.nil?, runs_seconds: runs_seconds)
     end
+    out
+  end
+
+  # A verb's call from its arguments by name: its path's parts, its
+  # query's fields, and the rest its body ("data", bytes or base64, for a
+  # verb whose body is bytes).
+  def self.call_route(transport, route, args, idempotency_key: nil)
+    rest = args.transform_keys(&:to_s).compact
+    path = route["path"].dup
+    route["params"].each do |p|
+      raise ArgumentError, "#{p} is required." unless rest.key?(p)
+      path = path.sub("{#{p}}", URI.encode_www_form_component(rest.delete(p).to_s))
+    end
+    query = route["query"].each_with_object({}) { |q, h| h[q] = rest.delete(q) if rest.key?(q) }
+    data = nil
+    if route["body"] == "bytes"
+      d = rest.delete("data")
+      data = d.is_a?(String) && d.encoding != Encoding::BINARY ? d.unpack1("m") : d
+    end
+    runs = route["runs"]
+    # A verb that runs waits as long as its field says, or to its end when it is left out.
+    runs_seconds = runs && !rest[runs].nil? ? Float(rest[runs]) : nil
+    transport.request(route["method"], path, query: query.empty? ? nil : query, body: route["body"] == "json" ? rest : nil,
+                      data: data, raw: route["raw"], idempotency_key: idempotency_key, idempotent: route["idempotent"], runs: !runs.nil?, runs_seconds: runs_seconds)
   end
 end

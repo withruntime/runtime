@@ -34,7 +34,7 @@ type VolumeMount struct {
 	Path string `json:"path"`
 }
 
-// SandboxRun A command a sandbox runs once it starts: when it ends, the sandbox stops.
+// SandboxRun A command a machine runs once it starts: when it ends, the machine stops.
 type SandboxRun struct {
 	// Cmd The command: text, run by `bash -lc`, or the program and its arguments as a list, run without a shell.
 	Cmd any `json:"cmd"`
@@ -46,7 +46,7 @@ type SandboxRun struct {
 	TimeoutSeconds *float64 `json:"timeoutSeconds,omitempty"`
 }
 
-// NetworkRules Where a sandbox may connect out, past the walls every machine has.
+// NetworkRules Where a machine may connect out, past the walls every machine has.
 type NetworkRules struct {
 	// AllowOutbound The only places it may reach, each a host, `*.` and a name for every name under it, an address or a CIDR (`[` and `]` around an IPv6 address), every port when it names none; `:port` for that port alone, on a host name for a port beyond 80 and 443, which go together. `*` is every public host. Every public host when omitted; nothing when empty.
 	AllowOutbound []string `json:"allowOutbound,omitempty"`
@@ -54,13 +54,13 @@ type NetworkRules struct {
 	DenyOutbound []string `json:"denyOutbound,omitempty"`
 }
 
-// SandboxSettings A sandbox's settings: what a create sets on its machine.
+// SandboxSettings A machine's settings: what a create sets on it.
 type SandboxSettings struct {
-	// Vcpu Its vCPUs. At least 1. Default: 2.
+	// Vcpu Its vCPUs; its product's default when omitted. At least 1.
 	Vcpu *int64 `json:"vcpu,omitempty"`
-	// MemoryGb Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4.
+	// MemoryGb Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1.
 	MemoryGb *float64 `json:"memoryGB,omitempty"`
-	// DiskGb Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4.
+	// DiskGb Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1.
 	DiskGb *float64 `json:"diskGB,omitempty"`
 	// Image The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
 	Image *string `json:"image,omitempty"`
@@ -72,29 +72,37 @@ type SandboxSettings struct {
 	User *string `json:"user,omitempty"`
 }
 
-// SandboxCreate A sandbox to create.
+// SandboxCreate A machine to create.
 type SandboxCreate struct {
 	SandboxSettings
 	// Volumes Volumes it attaches and mounts at its create, at most one; detached when it is deleted, to attach to another.
 	Volumes []VolumeMount `json:"volumes,omitempty"`
-	// Run A command it runs once it starts. When the command ends, the sandbox is `paused` with its disk kept (exitCode says how it ended) and a call starts it again. Needs the `exec` permission too.
+	// Run A command it runs once it starts. When the command ends, the machine is `paused` with its disk kept (exitCode says how it ended) and a call starts it again. Needs the `exec` permission too.
 	Run *SandboxRun `json:"run,omitempty"`
 	// Name Its name, unique in its project.
 	Name *string `json:"name,omitempty"`
 	// Labels Labels to find it by.
 	Labels map[string]string `json:"labels,omitempty"`
-	// GetOrCreate With a name: the sandbox of that name when there is one, else a new one.
+	// GetOrCreate With a name: the machine of that name when there is one, else a new one.
 	GetOrCreate *bool `json:"getOrCreate,omitempty"`
 	// MaxCost The most it may cost in all, in US dollars (`"5.00"`): once it has cost that it pauses, and starts again only once its maxCost is raised (`update`); what a key's per-request and spend caps count. When omitted under a key with a per-request or spend cap, the most that key's caps leave.
 	MaxCost *string `json:"maxCost,omitempty"`
-	// IdlePauseSeconds Seconds with nothing happening before it pauses, 60 to 86400; 0 never; 300 when omitted. A fork keeps its source's, except 0: a copy never pauses only when its fork asks. At least 0. At most 86400.
+	// IdlePauseSeconds Seconds with nothing happening before it pauses, 60 to 86400; 0 never; its product's default when omitted (300 for a sandbox). A fork keeps its source's, except 0: a copy never pauses only when its fork asks. At least 0. At most 86400.
 	IdlePauseSeconds *int64 `json:"idlePauseSeconds,omitempty"`
-	// Snapshot A snapshot it starts as: a copy of it running, at its sizes, in its project, with its secrets.
+	// From What it starts as, by ID or name: a snapshot (a copy of it running, at its sizes, in its project, with its secrets) or an image (as `image` takes it). A name is a snapshot's when the project has one of that name, else an image's. Not with `image`. Running copies of a sandbox are `fork`'s.
+	From *string `json:"from,omitempty"`
+	// Snapshot Deprecated: SDK 1.0.x's name for `from` with a snapshot, read as `from` ([`snapshot_is_from`]). Not with `from`.
 	Snapshot *string `json:"snapshot,omitempty"`
 	// Network Where it may connect out from its first start, as setNetwork takes it; the open internet behind every machine's walls when omitted.
 	Network *NetworkRules `json:"network,omitempty"`
 	// Env Environment variables for every command and process in it and its start, at most 32 and 32768 bytes of names and values; values are never answered. A copy keeps them.
 	Env map[string]string `json:"env,omitempty"`
+	// AutoWake Whether a call that reaches it paused (an exec, a file, a terminal, a preview's visitor) resumes it; true when omitted. false: such a call answers 409 sandbox_paused and it stays paused until its own `:resume`. A fork's copies keep it.
+	AutoWake *bool `json:"autoWake,omitempty"`
+	// DeleteAfterSeconds Seconds until Runtime deletes it, as its delete does: final at once, its memory and disk gone and no longer billed; it can't be undone. 0 or omitted: kept until deleted. Its owner renews it with update; a copy, snapshot or image made from it sets its own. At least 0. At most 315360000.
+	DeleteAfterSeconds *int64 `json:"deleteAfterSeconds,omitempty"`
+	// DeleteProtection Whether its delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`. While true, its time limit pauses it instead of deleting it; only its organization's close deletes it. A copy, snapshot or image made from it sets its own.
+	DeleteProtection *bool `json:"deleteProtection,omitempty"`
 }
 
 // MachineReady How a create's wait for its start's ready check (`start.readyPort`, `start.readyCommand`) went.
@@ -105,12 +113,12 @@ type MachineReady struct {
 	WaitedMs int64 `json:"waitedMs"`
 }
 
-// SandboxInfo A sandbox.
+// SandboxInfo A machine.
 type SandboxInfo struct {
 	SandboxSettings
 	// ID Its ID.
 	ID string `json:"id"`
-	// Object Always `sandbox`.
+	// Object Its product's kind: `sandbox` for a sandbox, `app` for an app, and so on.
 	Object string `json:"object"`
 	// Name Its name, unique in its project.
 	Name *string `json:"name,omitempty"`
@@ -128,12 +136,20 @@ type SandboxInfo struct {
 	IdlePauseSeconds *int64 `json:"idlePauseSeconds,omitempty"`
 	// MaxCost The most it may cost in all, in US dollars; none when it has no such cap.
 	MaxCost *string `json:"maxCost,omitempty"`
+	// AutoWake Whether a call that reaches it paused resumes it; false: only its own resume does, and such a call answers 409 sandbox_paused. Default: true.
+	AutoWake *bool `json:"autoWake,omitempty"`
 	// ExitCode Its run's exit code, once its run ended; none for one a signal or its timeout ended.
 	ExitCode *int64 `json:"exitCode,omitempty"`
 	// EndedAt When its run ended.
 	EndedAt *string `json:"endedAt,omitempty"`
+	// PausedAt When its pause began (or its run ended), while it is paused.
+	PausedAt *string `json:"pausedAt,omitempty"`
 	// Ready A create's answer alone, for a start with a ready check: how its wait went.
 	Ready *MachineReady `json:"ready,omitempty"`
+	// DeleteAt When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted.
+	DeleteAt *string `json:"deleteAt,omitempty"`
+	// DeleteProtection Whether its delete is refused (409 `delete_protected`) until an update turns this off.
+	DeleteProtection *bool `json:"deleteProtection,omitempty"`
 }
 
 // Terminal A terminal's size.
@@ -166,7 +182,7 @@ type ExecRequest struct {
 	OutputEncoding *string `json:"outputEncoding,omitempty"`
 	// Pty Run it on a terminal of this size: its input, output and controlling terminal; not with a wait for its end.
 	Pty *Terminal `json:"pty,omitempty"`
-	// User Who it runs as: `runtime` (uid 1000, with passwordless sudo) or `root`; the sandbox's `user` when omitted.
+	// User Who it runs as: `runtime` (uid 1000, with passwordless sudo) or `root`; the machine's `user` when omitted.
 	User *string `json:"user,omitempty"`
 }
 
@@ -212,6 +228,52 @@ type Process struct {
 	StderrTruncated *bool `json:"stderrTruncated,omitempty"`
 	// DurationSeconds How long it ran, in seconds, to the millisecond, once it ended.
 	DurationSeconds *float64 `json:"durationSeconds,omitempty"`
+}
+
+// ExecEventError A failed read of an exec's events: the error the API would have answered, and where to follow on from.
+type ExecEventError struct {
+	// Code The error's code.
+	Code string `json:"code"`
+	// Message What went wrong.
+	Message *string `json:"message,omitempty"`
+	// Status The status the API answered.
+	Status *int64 `json:"status,omitempty"`
+	// ProcessID The process.
+	ProcessID *string `json:"processId,omitempty"`
+	// Cursor The cursor to follow its output on from (processes.output).
+	Cursor *int64 `json:"cursor,omitempty"`
+}
+
+// ExecEvent One event of an exec asked for its events (`stream: true`, or `Accept: application/x-ndjson`), one JSON object a line: `start`, then `stdout` and `stderr` as the output comes, `truncated` when output was dropped before it was read, and `exit`; or `continue` (follow on with processes.output from `cursor`) or `error`.
+type ExecEvent struct {
+	// Type `start`, `stdout`, `stderr`, `truncated`, `exit`, `continue` or `error`.
+	Type string `json:"type"`
+	// ProcessID The process: `start` and `continue`.
+	ProcessID *string `json:"processId,omitempty"`
+	// Replayed `start`: this Idempotency-Key ran it before, and these are that run's events again.
+	Replayed *bool `json:"replayed,omitempty"`
+	// Data `stdout` and `stderr`: the output, as text.
+	Data *string `json:"data,omitempty"`
+	// Base64 `stdout` and `stderr`: the output's bytes, in base64, with outputEncoding `base64`.
+	Base64 *string `json:"base64,omitempty"`
+	// Offset `stdout` and `stderr`: where in the process's output these bytes start.
+	Offset *int64 `json:"offset,omitempty"`
+	// DroppedBytes `truncated`: how many bytes were dropped.
+	DroppedBytes *int64 `json:"droppedBytes,omitempty"`
+	// ResumeAt `truncated`: where the output read on from.
+	ResumeAt *int64 `json:"resumeAt,omitempty"`
+	// ExitCode `exit`: its exit code.
+	ExitCode *int64 `json:"exitCode,omitempty"`
+	// State `exit`: how it ended.
+	State *string `json:"state,omitempty"`
+	// TimedOut `exit`: it was stopped at its timeout.
+	TimedOut *bool `json:"timedOut,omitempty"`
+	// DurationSeconds `exit`: how long it ran.
+	DurationSeconds *float64 `json:"durationSeconds,omitempty"`
+	// Cursor `continue`: the cursor to follow its output on from (processes.output).
+	Cursor *int64 `json:"cursor,omitempty"`
+	// Error `error`: what failed.
+	Error *ExecEventError `json:"error,omitempty"`
 }
 
 // FileWritten A file written.
@@ -298,7 +360,7 @@ type FileRemoved struct {
 	Removed bool `json:"removed"`
 }
 
-// FileInfo A path in a sandbox: what is there, if anything.
+// FileInfo A path in a machine: what is there, if anything.
 type FileInfo struct {
 	// Path Its path.
 	Path string `json:"path"`
@@ -416,9 +478,9 @@ type FileRenamed struct {
 	Sha256 *string `json:"sha256,omitempty"`
 }
 
-// FileLinkCreate A file link to make: an expiring address for one file of a sandbox (or, with `archive`, a folder) that anyone may open with no API key.
+// FileLinkCreate A file link to make: an expiring address for one file of a machine (or, with `archive`, a folder) that anyone may open with no API key.
 type FileLinkCreate struct {
-	// Path The file's absolute path in the sandbox. For GET it must exist when the link is made.
+	// Path The file's absolute path in the machine. For GET it must exist when the link is made.
 	Path string `json:"path"`
 	// Method `GET` (default): a download link. `PUT`: an upload link; the request's body becomes the file.
 	Method *string `json:"method,omitempty"`
@@ -428,7 +490,7 @@ type FileLinkCreate struct {
 	Filename *string `json:"filename,omitempty"`
 	// MaxBytes PUT only: the largest body the link takes, in bytes; 5 GiB by default and at most. At least 0. At most 5368709120.
 	MaxBytes *int64 `json:"maxBytes,omitempty"`
-	// Wake false: a paused sandbox is not woken for the link, which answers 409 `sandbox_paused`. Unset or true: it is woken.
+	// Wake false: a paused machine is not woken for the link, which answers 409 `sandbox_paused`. Unset or true: it is woken.
 	Wake *bool `json:"wake,omitempty"`
 	// Archive GET only: `path` is a folder, downloaded as a `.tar.gz`. Default: false.
 	Archive *bool `json:"archive,omitempty"`
@@ -440,9 +502,9 @@ type FileLink struct {
 	Url string `json:"url"`
 	// Method `GET` or `PUT`.
 	Method string `json:"method"`
-	// Path The file's path in the sandbox.
+	// Path The file's path in the machine.
 	Path string `json:"path"`
-	// SandboxID The sandbox.
+	// SandboxID The machine.
 	SandboxID string `json:"sandboxId"`
 	// ExpiresAt When it stops working.
 	ExpiresAt string `json:"expiresAt"`
@@ -454,18 +516,18 @@ type FileLink struct {
 	Archive *bool `json:"archive,omitempty"`
 }
 
-// FileLinksRevoked A sandbox's file links ended.
+// FileLinksRevoked A machine's file links ended.
 type FileLinksRevoked struct {
-	// SandboxID The sandbox.
+	// SandboxID The machine.
 	SandboxID string `json:"sandboxId"`
 	// RevokedAt When they ended: every link made before it.
 	RevokedAt string `json:"revokedAt"`
 }
 
-// SandboxNetwork Where a sandbox may connect out.
+// SandboxNetwork Where a machine may connect out.
 type SandboxNetwork struct {
 	NetworkRules
-	// ID The sandbox's ID.
+	// ID The machine's ID.
 	ID string `json:"id"`
 }
 
@@ -499,7 +561,7 @@ type MetricPoint struct {
 	DiskWriteOpsPerSecond *float64 `json:"diskWriteOpsPerSecond,omitempty"`
 }
 
-// MetricsBase A sandbox's CPU and memory over a time window, in steps, and its current reading (with disk and pressure) while it runs. Steps are returned in every state, including paused and stopped. Ranges: `15m` and `1h` in 60-second steps, `6h` in 120-second steps, `24h` in 480-second steps, `7d` and `30d` in 1-hour steps. Defaults to `1h`.
+// MetricsBase A machine's CPU and memory over a time window, in steps, and its current reading (with disk and pressure) while it runs. Steps are returned in every state, including paused and stopped. Ranges: `15m` and `1h` in 60-second steps, `6h` in 120-second steps, `24h` in 480-second steps, `7d` and `30d` in 1-hour steps. Defaults to `1h`.
 type MetricsBase struct {
 	// State Its state.
 	State string `json:"state"`
@@ -519,18 +581,18 @@ type MetricsBase struct {
 	DiskLimitBytes int64 `json:"diskLimitBytes"`
 	// Latest The reading taken now; none when it is not running or its host could not read it.
 	Latest *MetricPoint `json:"latest,omitempty"`
-	// Points The window's steps, oldest first, each averaged over the time the sandbox ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading.
+	// Points The window's steps, oldest first, each averaged over the time the machine ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading.
 	Points []MetricPoint `json:"points"`
 }
 
-// SandboxMetrics A sandbox's metrics.
+// SandboxMetrics A machine's metrics.
 type SandboxMetrics struct {
 	MetricsBase
-	// ID The sandbox's ID.
+	// ID The machine's ID.
 	ID string `json:"id"`
 }
 
-// ForkRequest Copies of a sandbox to make, as it is now.
+// ForkRequest Copies of a machine to make, as it is now.
 type ForkRequest struct {
 	// Count How many. At least 1. At most 100. Default: 1.
 	Count *int64 `json:"count,omitempty"`
@@ -544,6 +606,12 @@ type ForkRequest struct {
 	MaxCost *string `json:"maxCost,omitempty"`
 	// IdlePauseSeconds Seconds with nothing happening before each copy pauses, 60 to 86400; 0 never. When omitted, its source's, unless its source never pauses (0): then its product's default, 300 for a sandbox. At least 0. At most 86400.
 	IdlePauseSeconds *int64 `json:"idlePauseSeconds,omitempty"`
+	// Vcpu The vCPUs each copy may use, at most its source's; its source's when omitted. A copy keeps its source's vCPUs online and is held to this many vCPUs of CPU time, which it is placed and billed by. Its memory is its source's. At least 1.
+	Vcpu *int64 `json:"vcpu,omitempty"`
+	// DeleteAfterSeconds Seconds until Runtime deletes each copy, as its delete does: final, and it can't be undone. 0 or omitted: kept until deleted; a copy never takes its source's. At least 0. At most 315360000.
+	DeleteAfterSeconds *int64 `json:"deleteAfterSeconds,omitempty"`
+	// DeleteProtection Whether each copy's delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`; a copy never takes its source's.
+	DeleteProtection *bool `json:"deleteProtection,omitempty"`
 }
 
 // Forked The copies a fork made, each running.
@@ -552,7 +620,7 @@ type Forked struct {
 	Sandboxes []SandboxInfo `json:"sandboxes"`
 }
 
-// SnapshotRequest A snapshot of a sandbox to take.
+// SnapshotRequest A snapshot of a machine to take.
 type SnapshotRequest struct {
 	// Name Its name, unique among the project's snapshots.
 	Name *string `json:"name,omitempty"`
@@ -560,8 +628,12 @@ type SnapshotRequest struct {
 	Labels map[string]string `json:"labels,omitempty"`
 	// Image Keeps its disk alone, synced, as the next version of the image of this name (`name:1`, `name:2`, ...) in place of a snapshot: an image machines are created from, each booting fresh over a disk of its own. Its memory is not kept; name is ignored.
 	Image *string `json:"image,omitempty"`
-	// Start With image: the command each machine created from the image starts at every fresh boot; the sandbox's own when omitted.
+	// Start With image: the command each machine created from the image starts at every fresh boot; the machine's own when omitted.
 	Start *MachineStart `json:"start,omitempty"`
+	// DeleteAfterSeconds Seconds until Runtime deletes the snapshot (or, with image, that image version), as its delete does: final, and it can't be undone. 0 or omitted: kept until deleted. At least 0. At most 315360000.
+	DeleteAfterSeconds *int64 `json:"deleteAfterSeconds,omitempty"`
+	// DeleteProtection Whether the snapshot's (or, with image, that image version's) delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`.
+	DeleteProtection *bool `json:"deleteProtection,omitempty"`
 }
 
 // Stored Stored data: a snapshot, an image or a volume.
@@ -580,7 +652,7 @@ type Stored struct {
 	SizeBytes int64 `json:"sizeBytes"`
 	// StoredBytes What it holds now, in bytes.
 	StoredBytes int64 `json:"storedBytes"`
-	// ParentID What it was made from (a snapshot's sandbox, an image's base), if anything.
+	// ParentID What it was made from (a snapshot's machine, an image's base), if anything.
 	ParentID *string `json:"parentId,omitempty"`
 	// AttachedTo The machine it is attached to now, if any.
 	AttachedTo *string `json:"attachedTo,omitempty"`
@@ -594,6 +666,12 @@ type Stored struct {
 	Error *string `json:"error,omitempty"`
 	// DeletedAt When it was deleted: a delete's answer, its state `deleted`.
 	DeletedAt *string `json:"deletedAt,omitempty"`
+	// DeleteAt When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted.
+	DeleteAt *string `json:"deleteAt,omitempty"`
+	// DeleteWaitsFor Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does.
+	DeleteWaitsFor *string `json:"deleteWaitsFor,omitempty"`
+	// DeleteProtection Whether its delete is refused (409 `delete_protected`) until an update turns this off.
+	DeleteProtection *bool `json:"deleteProtection,omitempty"`
 }
 
 // MachineUpdate A change to a machine's settings: each field left out stays as it is.
@@ -602,11 +680,11 @@ type MachineUpdate struct {
 	Name *string `json:"name,omitempty"`
 	// Labels Its labels, in place of its own; those under `runtime.` are kept.
 	Labels map[string]string `json:"labels,omitempty"`
-	// IdlePauseSeconds Seconds with nothing happening before it pauses, 60 to 86400; 0 never.
+	// IdlePauseSeconds Seconds with nothing happening before it pauses, 60 to 86400; 0 never. Nothing happening means no call or command running, no traffic, almost no CPU, and no outbound connection it opened still open.
 	IdlePauseSeconds *int64 `json:"idlePauseSeconds,omitempty"`
-	// Vcpu Its vCPUs, grown while it runs; a running sandbox's vCPUs only grow. At least 1.
+	// Vcpu Its vCPUs, grown while it runs; a running machine's vCPUs only grow. At least 1.
 	Vcpu *int64 `json:"vcpu,omitempty"`
-	// MemoryGb Its memory in GB (1 GB is 1,024 MiB), grown while it runs; a running sandbox's memory only grows. At least 1.
+	// MemoryGb Its memory in GB (1 GB is 1,024 MiB), grown while it runs; a running machine's memory only grows. At least 1.
 	MemoryGb *float64 `json:"memoryGB,omitempty"`
 	// DiskGb Its disk in GB (1 GB is 1,024 MiB), grown while it runs, its file system with it; a disk only grows. At least 1.
 	DiskGb *float64 `json:"diskGB,omitempty"`
@@ -618,6 +696,12 @@ type MachineUpdate struct {
 	RemoveEnv []string `json:"removeEnv,omitempty"`
 	// MaxCost The most it may cost in all, in US dollars (`"5.00"`), in place of its own: one paused at its old maxCost wakes at its next call under a higher one.
 	MaxCost *string `json:"maxCost,omitempty"`
+	// AutoWake Whether a call that reaches it paused (an exec, a file, a terminal, a preview's visitor) resumes it from now. false: such a call answers 409 sandbox_paused and it stays paused until its own `:resume`.
+	AutoWake *bool `json:"autoWake,omitempty"`
+	// DeleteAfterSeconds Seconds from now until Runtime deletes it, as its delete does: final, and it can't be undone. Sent again before then, it renews it; 0 takes its end off (kept until deleted). At least 0. At most 315360000.
+	DeleteAfterSeconds *int64 `json:"deleteAfterSeconds,omitempty"`
+	// DeleteProtection true refuses its delete (409 `delete_protected`) until an update sends false; while true, its time limit pauses it instead of deleting it. Not while it has a `deleteAt`, unless the same update sends `deleteAfterSeconds` 0.
+	DeleteProtection *bool `json:"deleteProtection,omitempty"`
 }
 
 // Action One step of an act: a mouse move, click, drag or scroll, typed text, a key chord, or a wait.
@@ -656,17 +740,17 @@ type ActRequest struct {
 
 // Point A point on the screen, in pixels from its top left corner.
 type Point struct {
-	// X 
+	// X
 	X int64 `json:"x"`
-	// Y 
+	// Y
 	Y int64 `json:"y"`
 }
 
 // ScreenSize The screen's size, in pixels.
 type ScreenSize struct {
-	// Width 
+	// Width
 	Width int64 `json:"width"`
-	// Height 
+	// Height
 	Height int64 `json:"height"`
 }
 
@@ -1009,7 +1093,7 @@ func (q SandboxScreenshotQuery) values() url.Values {
 	return v
 }
 
-// Sandboxes A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused with nothing changing it, a `sandbox.still_paused` event is written for its organization.
+// Sandboxes A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused, counted from its `pausedAt`, a `sandbox.still_paused` event is written for its organization.
 type Sandboxes struct {
 	t *Transport
 }
@@ -1041,9 +1125,9 @@ func (c *Sandboxes) List(ctx context.Context, q SandboxListQuery, opts *RequestO
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Sandboxes) ListAll(ctx context.Context, q SandboxListQuery, opts *RequestOptions) iter.Seq2[SandboxInfo, error] {
-	return all(func(cursor *string) (*Page[SandboxInfo], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[SandboxInfo], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
@@ -1125,6 +1209,15 @@ func (c *Sandboxes) WriteProcess(ctx context.Context, id string, process string,
 func (c *Sandboxes) SignalProcess(ctx context.Context, id string, process string, in ProcessSignal, opts *RequestOptions) (*Process, error) {
 	out := new(Process)
 	if err := c.t.Do(ctx, "POST", "/v2/sandboxes/"+url.PathEscape(id)+"/processes/"+url.PathEscape(process)+":signal", nil, in, Call{Idempotent: true}, opts, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ResizeProcess Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe.
+func (c *Sandboxes) ResizeProcess(ctx context.Context, id string, process string, in Terminal, opts *RequestOptions) (*Process, error) {
+	out := new(Process)
+	if err := c.t.Do(ctx, "POST", "/v2/sandboxes/"+url.PathEscape(id)+"/processes/"+url.PathEscape(process)+":resize", nil, in, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -1301,7 +1394,7 @@ func (c *Sandboxes) Snapshot(ctx context.Context, id string, in SnapshotRequest,
 	return out, nil
 }
 
-// Update Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412.
+// Update Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused.
 func (c *Sandboxes) Update(ctx context.Context, id string, in MachineUpdate, opts *RequestOptions) (*SandboxInfo, error) {
 	out := new(SandboxInfo)
 	if err := c.t.Do(ctx, "POST", "/v2/sandboxes/"+url.PathEscape(id)+":update", nil, in, Call{}, opts, out); err != nil {
@@ -1508,6 +1601,15 @@ func (g *SandboxProcesses) Signal(ctx context.Context, process string, in *Proce
 	return g.c.SignalProcess(ctx, g.id, process, b, opts)
 }
 
+// Resize Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe.
+func (g *SandboxProcesses) Resize(ctx context.Context, process string, in *Terminal, opts *RequestOptions) (*Process, error) {
+	var b Terminal
+	if in != nil {
+		b = *in
+	}
+	return g.c.ResizeProcess(ctx, g.id, process, b, opts)
+}
+
 // List Lists a sandbox's processes, newest first: those running and those that ended lately.
 func (g *SandboxProcesses) List(ctx context.Context, opts *RequestOptions) (*ProcessList, error) {
 	return g.c.ListProcesses(ctx, g.id, opts)
@@ -1533,18 +1635,35 @@ func (g *SandboxNetworkCalls) Set(ctx context.Context, in *NetworkRules, opts *R
 	return g.c.SetNetwork(ctx, g.id, b, opts)
 }
 
-// Sandbox is one of sandboxes: A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused with nothing changing it, a `sandbox.still_paused` event is written for its organization.
+// SandboxPreviews is a sandbox's previews.
+type SandboxPreviews struct {
+	c  *Previews
+	id string
+}
+
+// Create Shares a port of a machine at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview.
+func (g *SandboxPreviews) Create(ctx context.Context, port int64, in *PreviewCreate, opts *RequestOptions) (*Preview, error) {
+	var b PreviewCreate
+	if in != nil {
+		b = *in
+	}
+	b.Port = port
+	return g.c.Create(ctx, g.id, b, opts)
+}
+
+// Sandbox is one of sandboxes: A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused, counted from its `pausedAt`, a `sandbox.still_paused` event is written for its organization.
 type Sandbox struct {
 	c *Sandboxes
 	// Info is what it was when last read.
-	Info *SandboxInfo
-	Files *SandboxFiles
+	Info      *SandboxInfo
+	Files     *SandboxFiles
 	Processes *SandboxProcesses
-	Network *SandboxNetworkCalls
+	Network   *SandboxNetworkCalls
+	Previews  *SandboxPreviews
 }
 
 func newSandbox(c *Sandboxes, info *SandboxInfo) *Sandbox {
-	return &Sandbox{c: c, Info: info, Files: &SandboxFiles{c: c, id: info.ID}, Processes: &SandboxProcesses{c: c, id: info.ID}, Network: &SandboxNetworkCalls{c: c, id: info.ID}}
+	return &Sandbox{c: c, Info: info, Files: &SandboxFiles{c: c, id: info.ID}, Processes: &SandboxProcesses{c: c, id: info.ID}, Network: &SandboxNetworkCalls{c: c, id: info.ID}, Previews: &SandboxPreviews{c: &Previews{t: c.t}, id: info.ID}}
 }
 
 // ID is its id.
@@ -1628,7 +1747,7 @@ func (s *Sandbox) Snapshot(ctx context.Context, in *SnapshotRequest, opts *Reque
 	return s.c.Snapshot(ctx, s.Info.ID, b, opts)
 }
 
-// Update Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412.
+// Update Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused.
 func (s *Sandbox) Update(ctx context.Context, in *MachineUpdate, opts *RequestOptions) error {
 	var b MachineUpdate
 	if in != nil {
@@ -1676,15 +1795,15 @@ func (s *Sandbox) ExecStream(cmd string, in *ExecRequest, opts *RequestOptions) 
 	c, id := s.c, s.Info.ID
 	return newStream(
 		func(ctx context.Context) (*Process, error) {
-		var b ExecRequest
-		if in != nil {
-			b = *in
-		}
-		if cmd != "" {
-			b.Cmd = cmd
-		}
-		b.Wait = Ptr(false)
-		return c.Exec(ctx, id, b, opts)
+			var b ExecRequest
+			if in != nil {
+				b = *in
+			}
+			if cmd != "" {
+				b.Cmd = cmd
+			}
+			b.Wait = Ptr(false)
+			return c.Exec(ctx, id, b, opts)
 		},
 		func(ctx context.Context, t *Process, cursor int64) ([]OutputChunk, int64, *Process, error) {
 			a, err := c.ProcessOutput(ctx, id, t.ID, SandboxProcessOutputQuery{Cursor: Ptr(cursor), WaitSeconds: Ptr(float64(8))}, opts)

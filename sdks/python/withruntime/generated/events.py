@@ -33,6 +33,8 @@ class Event:
     reason: Optional[str] = None
     #: The exit code of a run that ended.
     exit_code: Optional[int] = None
+    #: When the resource's pause began (or its run ended), on an event of it paused or stopped.
+    paused_at: Optional[str] = None
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Event":
@@ -45,6 +47,7 @@ class Event:
             state=d.get("state"),
             reason=d.get("reason"),
             exit_code=d.get("exitCode"),
+            paused_at=d.get("pausedAt"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -57,6 +60,7 @@ class Event:
             "state": self.state,
             "reason": self.reason,
             "exitCode": self.exit_code,
+            "pausedAt": self.paused_at,
         })
 
 

@@ -17,6 +17,8 @@ import com.withruntime.generated.Sandboxes.Sandbox;
 import com.withruntime.generated.Sandboxes.Terminal;
 import com.withruntime.generated.Sandboxes.ExecRequest;
 import com.withruntime.generated.Sandboxes.Process;
+import com.withruntime.generated.Sandboxes.ExecEventError;
+import com.withruntime.generated.Sandboxes.ExecEvent;
 import com.withruntime.generated.Sandboxes.FileWritten;
 import com.withruntime.generated.Sandboxes.OutputChunk;
 import com.withruntime.generated.Sandboxes.ProcessOutput;
@@ -520,6 +522,11 @@ public final class Workspaces {
     return Process.of(t.request("POST", "/v2/workspaces/" + Transport.path(id) + "/processes/" + Transport.path(process) + ":signal", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
+  /** Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe. */
+  public Process resizeProcess(String id, String process, Terminal input, Transport.RequestOptions opts) {
+    return Process.of(t.request("POST", "/v2/workspaces/" + Transport.path(id) + "/processes/" + Transport.path(process) + ":resize", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
+  }
+
   /** Lists a workspace's processes, newest first: those running and those that ended lately. */
   public ProcessList listProcesses(String id, Transport.RequestOptions opts) {
     return ProcessList.of(t.request("GET", "/v2/workspaces/" + Transport.path(id) + "/processes", null, null, new Transport.Call(true, null), opts));
@@ -615,7 +622,7 @@ public final class Workspaces {
     return Stored.of(t.request("POST", "/v2/workspaces/" + Transport.path(id) + ":snapshot", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
-  /** Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. */
+  /** Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused. */
   public Sandbox update(String id, MachineUpdate input, Transport.RequestOptions opts) {
     return Sandbox.of(t.request("POST", "/v2/workspaces/" + Transport.path(id) + ":update", null, input == null ? null : input.toMap(), new Transport.Call(false, null), opts));
   }

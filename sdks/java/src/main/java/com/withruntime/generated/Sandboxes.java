@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused with nothing changing it, a `sandbox.still_paused` event is written for its organization. */
+/** A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused, counted from its `pausedAt`, a `sandbox.still_paused` event is written for its organization. */
 public final class Sandboxes {
   private final Transport t;
 
@@ -123,7 +123,7 @@ public final class Sandboxes {
     }
   }
 
-  /** A command a sandbox runs once it starts: when it ends, the sandbox stops. */
+  /** A command a machine runs once it starts: when it ends, the machine stops. */
   public static final class SandboxRun {
     /** The command: text, run by `bash -lc`, or the program and its arguments as a list, run without a shell. */
     public Object cmd;
@@ -177,7 +177,7 @@ public final class Sandboxes {
     }
   }
 
-  /** Where a sandbox may connect out, past the walls every machine has. */
+  /** Where a machine may connect out, past the walls every machine has. */
   public static final class NetworkRules {
     /** The only places it may reach, each a host, `*.` and a name for every name under it, an address or a CIDR (`[` and `]` around an IPv6 address), every port when it names none; `:port` for that port alone, on a host name for a port beyond 80 and 443, which go together. `*` is every public host. Every public host when omitted; nothing when empty. */
     public List<String> allowOutbound;
@@ -211,15 +211,15 @@ public final class Sandboxes {
     }
   }
 
-  /** A sandbox's settings: what a create sets on its machine. */
+  /** A machine's settings: what a create sets on it. */
   public static final class SandboxSettings {
-    /** Its vCPUs. At least 1. Default: 2. */
+    /** Its vCPUs; its product's default when omitted. At least 1. */
     public Long vcpu;
 
-    /** Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4. */
+    /** Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1. */
     public Double memoryGB;
 
-    /** Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4. */
+    /** Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1. */
     public Double diskGB;
 
     /** The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. */
@@ -295,15 +295,15 @@ public final class Sandboxes {
     }
   }
 
-  /** A sandbox to create. */
+  /** A machine to create. */
   public static final class SandboxCreate {
-    /** Its vCPUs. At least 1. Default: 2. */
+    /** Its vCPUs; its product's default when omitted. At least 1. */
     public Long vcpu;
 
-    /** Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4. */
+    /** Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1. */
     public Double memoryGB;
 
-    /** Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4. */
+    /** Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1. */
     public Double diskGB;
 
     /** The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. */
@@ -321,7 +321,7 @@ public final class Sandboxes {
     /** Volumes it attaches and mounts at its create, at most one; detached when it is deleted, to attach to another. */
     public List<VolumeMount> volumes;
 
-    /** A command it runs once it starts. When the command ends, the sandbox is `paused` with its disk kept (exitCode says how it ended) and a call starts it again. Needs the `exec` permission too. */
+    /** A command it runs once it starts. When the command ends, the machine is `paused` with its disk kept (exitCode says how it ended) and a call starts it again. Needs the `exec` permission too. */
     public SandboxRun run;
 
     /** Its name, unique in its project. */
@@ -330,16 +330,19 @@ public final class Sandboxes {
     /** Labels to find it by. */
     public Map<String, String> labels;
 
-    /** With a name: the sandbox of that name when there is one, else a new one. */
+    /** With a name: the machine of that name when there is one, else a new one. */
     public Boolean getOrCreate;
 
     /** The most it may cost in all, in US dollars (`"5.00"`): once it has cost that it pauses, and starts again only once its maxCost is raised (`update`); what a key's per-request and spend caps count. When omitted under a key with a per-request or spend cap, the most that key's caps leave. */
     public String maxCost;
 
-    /** Seconds with nothing happening before it pauses, 60 to 86400; 0 never; 300 when omitted. A fork keeps its source's, except 0: a copy never pauses only when its fork asks. At least 0. At most 86400. */
+    /** Seconds with nothing happening before it pauses, 60 to 86400; 0 never; its product's default when omitted (300 for a sandbox). A fork keeps its source's, except 0: a copy never pauses only when its fork asks. At least 0. At most 86400. */
     public Long idlePauseSeconds;
 
-    /** A snapshot it starts as: a copy of it running, at its sizes, in its project, with its secrets. */
+    /** What it starts as, by ID or name: a snapshot (a copy of it running, at its sizes, in its project, with its secrets) or an image (as `image` takes it). A name is a snapshot's when the project has one of that name, else an image's. Not with `image`. Running copies of a sandbox are `fork`'s. */
+    public String from;
+
+    /** Deprecated: SDK 1.0.x's name for `from` with a snapshot, read as `from` ([`snapshot_is_from`]). Not with `from`. */
     public String snapshot;
 
     /** Where it may connect out from its first start, as setNetwork takes it; the open internet behind every machine's walls when omitted. */
@@ -347,6 +350,15 @@ public final class Sandboxes {
 
     /** Environment variables for every command and process in it and its start, at most 32 and 32768 bytes of names and values; values are never answered. A copy keeps them. */
     public Map<String, String> env;
+
+    /** Whether a call that reaches it paused (an exec, a file, a terminal, a preview's visitor) resumes it; true when omitted. false: such a call answers 409 sandbox_paused and it stays paused until its own `:resume`. A fork's copies keep it. */
+    public Boolean autoWake;
+
+    /** Seconds until Runtime deletes it, as its delete does: final at once, its memory and disk gone and no longer billed; it can't be undone. 0 or omitted: kept until deleted. Its owner renews it with update; a copy, snapshot or image made from it sets its own. At least 0. At most 315360000. */
+    public Long deleteAfterSeconds;
+
+    /** Whether its delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`. While true, its time limit pauses it instead of deleting it; only its organization's close deletes it. A copy, snapshot or image made from it sets its own. */
+    public Boolean deleteProtection;
 
     public SandboxCreate vcpu(Long v) {
       this.vcpu = v;
@@ -418,6 +430,11 @@ public final class Sandboxes {
       return this;
     }
 
+    public SandboxCreate from(String v) {
+      this.from = v;
+      return this;
+    }
+
     public SandboxCreate snapshot(String v) {
       this.snapshot = v;
       return this;
@@ -430,6 +447,21 @@ public final class Sandboxes {
 
     public SandboxCreate env(Map<String, String> v) {
       this.env = v;
+      return this;
+    }
+
+    public SandboxCreate autoWake(Boolean v) {
+      this.autoWake = v;
+      return this;
+    }
+
+    public SandboxCreate deleteAfterSeconds(Long v) {
+      this.deleteAfterSeconds = v;
+      return this;
+    }
+
+    public SandboxCreate deleteProtection(Boolean v) {
+      this.deleteProtection = v;
       return this;
     }
 
@@ -450,9 +482,13 @@ public final class Sandboxes {
       o.getOrCreate = (m.get("getOrCreate") instanceof Boolean b ? b : null);
       o.maxCost = KitJson.asString(m.get("maxCost"));
       o.idlePauseSeconds = KitJson.asLong(m.get("idlePauseSeconds"));
+      o.from = KitJson.asString(m.get("from"));
       o.snapshot = KitJson.asString(m.get("snapshot"));
       o.network = (m.get("network") == null ? null : NetworkRules.of(m.get("network")));
       o.env = KitJson.asStringMap(m.get("env"));
+      o.autoWake = (m.get("autoWake") instanceof Boolean b ? b : null);
+      o.deleteAfterSeconds = KitJson.asLong(m.get("deleteAfterSeconds"));
+      o.deleteProtection = (m.get("deleteProtection") instanceof Boolean b ? b : null);
       return o;
     }
 
@@ -472,9 +508,13 @@ public final class Sandboxes {
       if (getOrCreate != null) m.put("getOrCreate", getOrCreate);
       if (maxCost != null) m.put("maxCost", maxCost);
       if (idlePauseSeconds != null) m.put("idlePauseSeconds", idlePauseSeconds);
+      if (from != null) m.put("from", from);
       if (snapshot != null) m.put("snapshot", snapshot);
       if (network != null) m.put("network", network.toMap());
       if (env != null) m.put("env", env);
+      if (autoWake != null) m.put("autoWake", autoWake);
+      if (deleteAfterSeconds != null) m.put("deleteAfterSeconds", deleteAfterSeconds);
+      if (deleteProtection != null) m.put("deleteProtection", deleteProtection);
       return m;
     }
   }
@@ -513,15 +553,15 @@ public final class Sandboxes {
     }
   }
 
-  /** A sandbox. */
+  /** A machine. */
   public static final class Sandbox {
-    /** Its vCPUs. At least 1. Default: 2. */
+    /** Its vCPUs; its product's default when omitted. At least 1. */
     public Long vcpu;
 
-    /** Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4. */
+    /** Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1. */
     public Double memoryGB;
 
-    /** Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4. */
+    /** Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1. */
     public Double diskGB;
 
     /** The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. */
@@ -539,7 +579,7 @@ public final class Sandboxes {
     /** Its ID. */
     public String id;
 
-    /** Always `sandbox`. */
+    /** Its product's kind: `sandbox` for a sandbox, `app` for an app, and so on. */
     public String object;
 
     /** Its name, unique in its project. */
@@ -566,14 +606,26 @@ public final class Sandboxes {
     /** The most it may cost in all, in US dollars; none when it has no such cap. */
     public String maxCost;
 
+    /** Whether a call that reaches it paused resumes it; false: only its own resume does, and such a call answers 409 sandbox_paused. Default: true. */
+    public Boolean autoWake;
+
     /** Its run's exit code, once its run ended; none for one a signal or its timeout ended. */
     public Long exitCode;
 
     /** When its run ended. */
     public String endedAt;
 
+    /** When its pause began (or its run ended), while it is paused. */
+    public String pausedAt;
+
     /** A create's answer alone, for a start with a ready check: how its wait went. */
     public MachineReady ready;
+
+    /** When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted. */
+    public String deleteAt;
+
+    /** Whether its delete is refused (409 `delete_protected`) until an update turns this off. */
+    public Boolean deleteProtection;
 
     public Sandbox vcpu(Long v) {
       this.vcpu = v;
@@ -660,6 +712,11 @@ public final class Sandboxes {
       return this;
     }
 
+    public Sandbox autoWake(Boolean v) {
+      this.autoWake = v;
+      return this;
+    }
+
     public Sandbox exitCode(Long v) {
       this.exitCode = v;
       return this;
@@ -670,8 +727,23 @@ public final class Sandboxes {
       return this;
     }
 
+    public Sandbox pausedAt(String v) {
+      this.pausedAt = v;
+      return this;
+    }
+
     public Sandbox ready(MachineReady v) {
       this.ready = v;
+      return this;
+    }
+
+    public Sandbox deleteAt(String v) {
+      this.deleteAt = v;
+      return this;
+    }
+
+    public Sandbox deleteProtection(Boolean v) {
+      this.deleteProtection = v;
       return this;
     }
 
@@ -695,9 +767,13 @@ public final class Sandboxes {
       o.revision = KitJson.asLong(m.get("revision"));
       o.idlePauseSeconds = KitJson.asLong(m.get("idlePauseSeconds"));
       o.maxCost = KitJson.asString(m.get("maxCost"));
+      o.autoWake = (m.get("autoWake") instanceof Boolean b ? b : null);
       o.exitCode = KitJson.asLong(m.get("exitCode"));
       o.endedAt = KitJson.asString(m.get("endedAt"));
+      o.pausedAt = KitJson.asString(m.get("pausedAt"));
       o.ready = (m.get("ready") == null ? null : MachineReady.of(m.get("ready")));
+      o.deleteAt = KitJson.asString(m.get("deleteAt"));
+      o.deleteProtection = (m.get("deleteProtection") instanceof Boolean b ? b : null);
       return o;
     }
 
@@ -720,9 +796,13 @@ public final class Sandboxes {
       if (revision != null) m.put("revision", revision);
       if (idlePauseSeconds != null) m.put("idlePauseSeconds", idlePauseSeconds);
       if (maxCost != null) m.put("maxCost", maxCost);
+      if (autoWake != null) m.put("autoWake", autoWake);
       if (exitCode != null) m.put("exitCode", exitCode);
       if (endedAt != null) m.put("endedAt", endedAt);
+      if (pausedAt != null) m.put("pausedAt", pausedAt);
       if (ready != null) m.put("ready", ready.toMap());
+      if (deleteAt != null) m.put("deleteAt", deleteAt);
+      if (deleteProtection != null) m.put("deleteProtection", deleteProtection);
       return m;
     }
   }
@@ -793,7 +873,7 @@ public final class Sandboxes {
     /** Run it on a terminal of this size: its input, output and controlling terminal; not with a wait for its end. */
     public Terminal pty;
 
-    /** Who it runs as: `runtime` (uid 1000, with passwordless sudo) or `root`; the sandbox's `user` when omitted. */
+    /** Who it runs as: `runtime` (uid 1000, with passwordless sudo) or `root`; the machine's `user` when omitted. */
     public String user;
 
     public ExecRequest cmd(Object v) {
@@ -1095,6 +1175,224 @@ public final class Sandboxes {
       if (stdoutTruncated != null) m.put("stdoutTruncated", stdoutTruncated);
       if (stderrTruncated != null) m.put("stderrTruncated", stderrTruncated);
       if (durationSeconds != null) m.put("durationSeconds", durationSeconds);
+      return m;
+    }
+  }
+
+  /** A failed read of an exec's events: the error the API would have answered, and where to follow on from. */
+  public static final class ExecEventError {
+    /** The error's code. */
+    public String code;
+
+    /** What went wrong. */
+    public String message;
+
+    /** The status the API answered. */
+    public Long status;
+
+    /** The process. */
+    public String processId;
+
+    /** The cursor to follow its output on from (processes.output). */
+    public Long cursor;
+
+    public ExecEventError code(String v) {
+      this.code = v;
+      return this;
+    }
+
+    public ExecEventError message(String v) {
+      this.message = v;
+      return this;
+    }
+
+    public ExecEventError status(Long v) {
+      this.status = v;
+      return this;
+    }
+
+    public ExecEventError processId(String v) {
+      this.processId = v;
+      return this;
+    }
+
+    public ExecEventError cursor(Long v) {
+      this.cursor = v;
+      return this;
+    }
+
+    static ExecEventError of(Object raw) {
+      Map<String, Object> m = KitJson.object(raw);
+      ExecEventError o = new ExecEventError();
+      o.code = KitJson.asString(m.get("code"));
+      o.message = KitJson.asString(m.get("message"));
+      o.status = KitJson.asLong(m.get("status"));
+      o.processId = KitJson.asString(m.get("processId"));
+      o.cursor = KitJson.asLong(m.get("cursor"));
+      return o;
+    }
+
+    Map<String, Object> toMap() {
+      Map<String, Object> m = new LinkedHashMap<>();
+      if (code != null) m.put("code", code);
+      if (message != null) m.put("message", message);
+      if (status != null) m.put("status", status);
+      if (processId != null) m.put("processId", processId);
+      if (cursor != null) m.put("cursor", cursor);
+      return m;
+    }
+  }
+
+  /** One event of an exec asked for its events (`stream: true`, or `Accept: application/x-ndjson`), one JSON object a line: `start`, then `stdout` and `stderr` as the output comes, `truncated` when output was dropped before it was read, and `exit`; or `continue` (follow on with processes.output from `cursor`) or `error`. */
+  public static final class ExecEvent {
+    /** `start`, `stdout`, `stderr`, `truncated`, `exit`, `continue` or `error`. */
+    public String type;
+
+    /** The process: `start` and `continue`. */
+    public String processId;
+
+    /** `start`: this Idempotency-Key ran it before, and these are that run's events again. */
+    public Boolean replayed;
+
+    /** `stdout` and `stderr`: the output, as text. */
+    public String data;
+
+    /** `stdout` and `stderr`: the output's bytes, in base64, with outputEncoding `base64`. */
+    public String base64;
+
+    /** `stdout` and `stderr`: where in the process's output these bytes start. */
+    public Long offset;
+
+    /** `truncated`: how many bytes were dropped. */
+    public Long droppedBytes;
+
+    /** `truncated`: where the output read on from. */
+    public Long resumeAt;
+
+    /** `exit`: its exit code. */
+    public Long exitCode;
+
+    /** `exit`: how it ended. */
+    public String state;
+
+    /** `exit`: it was stopped at its timeout. */
+    public Boolean timedOut;
+
+    /** `exit`: how long it ran. */
+    public Double durationSeconds;
+
+    /** `continue`: the cursor to follow its output on from (processes.output). */
+    public Long cursor;
+
+    /** `error`: what failed. */
+    public ExecEventError error;
+
+    public ExecEvent type(String v) {
+      this.type = v;
+      return this;
+    }
+
+    public ExecEvent processId(String v) {
+      this.processId = v;
+      return this;
+    }
+
+    public ExecEvent replayed(Boolean v) {
+      this.replayed = v;
+      return this;
+    }
+
+    public ExecEvent data(String v) {
+      this.data = v;
+      return this;
+    }
+
+    public ExecEvent base64(String v) {
+      this.base64 = v;
+      return this;
+    }
+
+    public ExecEvent offset(Long v) {
+      this.offset = v;
+      return this;
+    }
+
+    public ExecEvent droppedBytes(Long v) {
+      this.droppedBytes = v;
+      return this;
+    }
+
+    public ExecEvent resumeAt(Long v) {
+      this.resumeAt = v;
+      return this;
+    }
+
+    public ExecEvent exitCode(Long v) {
+      this.exitCode = v;
+      return this;
+    }
+
+    public ExecEvent state(String v) {
+      this.state = v;
+      return this;
+    }
+
+    public ExecEvent timedOut(Boolean v) {
+      this.timedOut = v;
+      return this;
+    }
+
+    public ExecEvent durationSeconds(Double v) {
+      this.durationSeconds = v;
+      return this;
+    }
+
+    public ExecEvent cursor(Long v) {
+      this.cursor = v;
+      return this;
+    }
+
+    public ExecEvent error(ExecEventError v) {
+      this.error = v;
+      return this;
+    }
+
+    static ExecEvent of(Object raw) {
+      Map<String, Object> m = KitJson.object(raw);
+      ExecEvent o = new ExecEvent();
+      o.type = KitJson.asString(m.get("type"));
+      o.processId = KitJson.asString(m.get("processId"));
+      o.replayed = (m.get("replayed") instanceof Boolean b ? b : null);
+      o.data = KitJson.asString(m.get("data"));
+      o.base64 = KitJson.asString(m.get("base64"));
+      o.offset = KitJson.asLong(m.get("offset"));
+      o.droppedBytes = KitJson.asLong(m.get("droppedBytes"));
+      o.resumeAt = KitJson.asLong(m.get("resumeAt"));
+      o.exitCode = KitJson.asLong(m.get("exitCode"));
+      o.state = KitJson.asString(m.get("state"));
+      o.timedOut = (m.get("timedOut") instanceof Boolean b ? b : null);
+      o.durationSeconds = KitJson.asDouble(m.get("durationSeconds"));
+      o.cursor = KitJson.asLong(m.get("cursor"));
+      o.error = (m.get("error") == null ? null : ExecEventError.of(m.get("error")));
+      return o;
+    }
+
+    Map<String, Object> toMap() {
+      Map<String, Object> m = new LinkedHashMap<>();
+      if (type != null) m.put("type", type);
+      if (processId != null) m.put("processId", processId);
+      if (replayed != null) m.put("replayed", replayed);
+      if (data != null) m.put("data", data);
+      if (base64 != null) m.put("base64", base64);
+      if (offset != null) m.put("offset", offset);
+      if (droppedBytes != null) m.put("droppedBytes", droppedBytes);
+      if (resumeAt != null) m.put("resumeAt", resumeAt);
+      if (exitCode != null) m.put("exitCode", exitCode);
+      if (state != null) m.put("state", state);
+      if (timedOut != null) m.put("timedOut", timedOut);
+      if (durationSeconds != null) m.put("durationSeconds", durationSeconds);
+      if (cursor != null) m.put("cursor", cursor);
+      if (error != null) m.put("error", error.toMap());
       return m;
     }
   }
@@ -1465,7 +1763,7 @@ public final class Sandboxes {
     }
   }
 
-  /** A path in a sandbox: what is there, if anything. */
+  /** A path in a machine: what is there, if anything. */
   public static final class FileInfo {
     /** Its path. */
     public String path;
@@ -1989,9 +2287,9 @@ public final class Sandboxes {
     }
   }
 
-  /** A file link to make: an expiring address for one file of a sandbox (or, with `archive`, a folder) that anyone may open with no API key. */
+  /** A file link to make: an expiring address for one file of a machine (or, with `archive`, a folder) that anyone may open with no API key. */
   public static final class FileLinkCreate {
-    /** The file's absolute path in the sandbox. For GET it must exist when the link is made. */
+    /** The file's absolute path in the machine. For GET it must exist when the link is made. */
     public String path;
 
     /** `GET` (default): a download link. `PUT`: an upload link; the request's body becomes the file. */
@@ -2006,7 +2304,7 @@ public final class Sandboxes {
     /** PUT only: the largest body the link takes, in bytes; 5 GiB by default and at most. At least 0. At most 5368709120. */
     public Long maxBytes;
 
-    /** false: a paused sandbox is not woken for the link, which answers 409 `sandbox_paused`. Unset or true: it is woken. */
+    /** false: a paused machine is not woken for the link, which answers 409 `sandbox_paused`. Unset or true: it is woken. */
     public Boolean wake;
 
     /** GET only: `path` is a folder, downloaded as a `.tar.gz`. Default: false. */
@@ -2081,10 +2379,10 @@ public final class Sandboxes {
     /** `GET` or `PUT`. */
     public String method;
 
-    /** The file's path in the sandbox. */
+    /** The file's path in the machine. */
     public String path;
 
-    /** The sandbox. */
+    /** The machine. */
     public String sandboxId;
 
     /** When it stops working. */
@@ -2167,9 +2465,9 @@ public final class Sandboxes {
     }
   }
 
-  /** A sandbox's file links ended. */
+  /** A machine's file links ended. */
   public static final class FileLinksRevoked {
-    /** The sandbox. */
+    /** The machine. */
     public String sandboxId;
 
     /** When they ended: every link made before it. */
@@ -2201,7 +2499,7 @@ public final class Sandboxes {
     }
   }
 
-  /** Where a sandbox may connect out. */
+  /** Where a machine may connect out. */
   public static final class SandboxNetwork {
     /** The only places it may reach, each a host, `*.` and a name for every name under it, an address or a CIDR (`[` and `]` around an IPv6 address), every port when it names none; `:port` for that port alone, on a host name for a port beyond 80 and 443, which go together. `*` is every public host. Every public host when omitted; nothing when empty. */
     public List<String> allowOutbound;
@@ -2209,7 +2507,7 @@ public final class Sandboxes {
     /** Places it may never reach, written as in allowOutbound with no port: a deny wins over every allow. */
     public List<String> denyOutbound;
 
-    /** The sandbox's ID. */
+    /** The machine's ID. */
     public String id;
 
     public SandboxNetwork allowOutbound(List<String> v) {
@@ -2389,7 +2687,7 @@ public final class Sandboxes {
     }
   }
 
-  /** A sandbox's CPU and memory over a time window, in steps, and its current reading (with disk and pressure) while it runs. Steps are returned in every state, including paused and stopped. Ranges: `15m` and `1h` in 60-second steps, `6h` in 120-second steps, `24h` in 480-second steps, `7d` and `30d` in 1-hour steps. Defaults to `1h`. */
+  /** A machine's CPU and memory over a time window, in steps, and its current reading (with disk and pressure) while it runs. Steps are returned in every state, including paused and stopped. Ranges: `15m` and `1h` in 60-second steps, `6h` in 120-second steps, `24h` in 480-second steps, `7d` and `30d` in 1-hour steps. Defaults to `1h`. */
   public static final class MetricsBase {
     /** Its state. */
     public String state;
@@ -2418,7 +2716,7 @@ public final class Sandboxes {
     /** The reading taken now; none when it is not running or its host could not read it. */
     public MetricPoint latest;
 
-    /** The window's steps, oldest first, each averaged over the time the sandbox ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading. */
+    /** The window's steps, oldest first, each averaged over the time the machine ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading. */
     public List<MetricPoint> points;
 
     public MetricsBase state(String v) {
@@ -2503,7 +2801,7 @@ public final class Sandboxes {
     }
   }
 
-  /** A sandbox's metrics. */
+  /** A machine's metrics. */
   public static final class SandboxMetrics {
     /** Its state. */
     public String state;
@@ -2532,10 +2830,10 @@ public final class Sandboxes {
     /** The reading taken now; none when it is not running or its host could not read it. */
     public MetricPoint latest;
 
-    /** The window's steps, oldest first, each averaged over the time the sandbox ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading. */
+    /** The window's steps, oldest first, each averaged over the time the machine ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading. */
     public List<MetricPoint> points;
 
-    /** The sandbox's ID. */
+    /** The machine's ID. */
     public String id;
 
     public SandboxMetrics state(String v) {
@@ -2627,7 +2925,7 @@ public final class Sandboxes {
     }
   }
 
-  /** Copies of a sandbox to make, as it is now. */
+  /** Copies of a machine to make, as it is now. */
   public static final class ForkRequest {
     /** How many. At least 1. At most 100. Default: 1. */
     public Long count;
@@ -2646,6 +2944,15 @@ public final class Sandboxes {
 
     /** Seconds with nothing happening before each copy pauses, 60 to 86400; 0 never. When omitted, its source's, unless its source never pauses (0): then its product's default, 300 for a sandbox. At least 0. At most 86400. */
     public Long idlePauseSeconds;
+
+    /** The vCPUs each copy may use, at most its source's; its source's when omitted. A copy keeps its source's vCPUs online and is held to this many vCPUs of CPU time, which it is placed and billed by. Its memory is its source's. At least 1. */
+    public Long vcpu;
+
+    /** Seconds until Runtime deletes each copy, as its delete does: final, and it can't be undone. 0 or omitted: kept until deleted; a copy never takes its source's. At least 0. At most 315360000. */
+    public Long deleteAfterSeconds;
+
+    /** Whether each copy's delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`; a copy never takes its source's. */
+    public Boolean deleteProtection;
 
     public ForkRequest count(Long v) {
       this.count = v;
@@ -2677,6 +2984,21 @@ public final class Sandboxes {
       return this;
     }
 
+    public ForkRequest vcpu(Long v) {
+      this.vcpu = v;
+      return this;
+    }
+
+    public ForkRequest deleteAfterSeconds(Long v) {
+      this.deleteAfterSeconds = v;
+      return this;
+    }
+
+    public ForkRequest deleteProtection(Boolean v) {
+      this.deleteProtection = v;
+      return this;
+    }
+
     static ForkRequest of(Object raw) {
       Map<String, Object> m = KitJson.object(raw);
       ForkRequest o = new ForkRequest();
@@ -2686,6 +3008,9 @@ public final class Sandboxes {
       o.secrets = KitJson.asStringList(m.get("secrets"));
       o.maxCost = KitJson.asString(m.get("maxCost"));
       o.idlePauseSeconds = KitJson.asLong(m.get("idlePauseSeconds"));
+      o.vcpu = KitJson.asLong(m.get("vcpu"));
+      o.deleteAfterSeconds = KitJson.asLong(m.get("deleteAfterSeconds"));
+      o.deleteProtection = (m.get("deleteProtection") instanceof Boolean b ? b : null);
       return o;
     }
 
@@ -2697,6 +3022,9 @@ public final class Sandboxes {
       if (secrets != null) m.put("secrets", secrets);
       if (maxCost != null) m.put("maxCost", maxCost);
       if (idlePauseSeconds != null) m.put("idlePauseSeconds", idlePauseSeconds);
+      if (vcpu != null) m.put("vcpu", vcpu);
+      if (deleteAfterSeconds != null) m.put("deleteAfterSeconds", deleteAfterSeconds);
+      if (deleteProtection != null) m.put("deleteProtection", deleteProtection);
       return m;
     }
   }
@@ -2725,7 +3053,7 @@ public final class Sandboxes {
     }
   }
 
-  /** A snapshot of a sandbox to take. */
+  /** A snapshot of a machine to take. */
   public static final class SnapshotRequest {
     /** Its name, unique among the project's snapshots. */
     public String name;
@@ -2736,8 +3064,14 @@ public final class Sandboxes {
     /** Keeps its disk alone, synced, as the next version of the image of this name (`name:1`, `name:2`, ...) in place of a snapshot: an image machines are created from, each booting fresh over a disk of its own. Its memory is not kept; name is ignored. */
     public String image;
 
-    /** With image: the command each machine created from the image starts at every fresh boot; the sandbox's own when omitted. */
+    /** With image: the command each machine created from the image starts at every fresh boot; the machine's own when omitted. */
     public MachineStart start;
+
+    /** Seconds until Runtime deletes the snapshot (or, with image, that image version), as its delete does: final, and it can't be undone. 0 or omitted: kept until deleted. At least 0. At most 315360000. */
+    public Long deleteAfterSeconds;
+
+    /** Whether the snapshot's (or, with image, that image version's) delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`. */
+    public Boolean deleteProtection;
 
     public SnapshotRequest name(String v) {
       this.name = v;
@@ -2759,6 +3093,16 @@ public final class Sandboxes {
       return this;
     }
 
+    public SnapshotRequest deleteAfterSeconds(Long v) {
+      this.deleteAfterSeconds = v;
+      return this;
+    }
+
+    public SnapshotRequest deleteProtection(Boolean v) {
+      this.deleteProtection = v;
+      return this;
+    }
+
     static SnapshotRequest of(Object raw) {
       Map<String, Object> m = KitJson.object(raw);
       SnapshotRequest o = new SnapshotRequest();
@@ -2766,6 +3110,8 @@ public final class Sandboxes {
       o.labels = KitJson.asStringMap(m.get("labels"));
       o.image = KitJson.asString(m.get("image"));
       o.start = (m.get("start") == null ? null : MachineStart.of(m.get("start")));
+      o.deleteAfterSeconds = KitJson.asLong(m.get("deleteAfterSeconds"));
+      o.deleteProtection = (m.get("deleteProtection") instanceof Boolean b ? b : null);
       return o;
     }
 
@@ -2775,6 +3121,8 @@ public final class Sandboxes {
       if (labels != null) m.put("labels", labels);
       if (image != null) m.put("image", image);
       if (start != null) m.put("start", start.toMap());
+      if (deleteAfterSeconds != null) m.put("deleteAfterSeconds", deleteAfterSeconds);
+      if (deleteProtection != null) m.put("deleteProtection", deleteProtection);
       return m;
     }
   }
@@ -2802,7 +3150,7 @@ public final class Sandboxes {
     /** What it holds now, in bytes. */
     public Long storedBytes;
 
-    /** What it was made from (a snapshot's sandbox, an image's base), if anything. */
+    /** What it was made from (a snapshot's machine, an image's base), if anything. */
     public String parentId;
 
     /** The machine it is attached to now, if any. */
@@ -2822,6 +3170,15 @@ public final class Sandboxes {
 
     /** When it was deleted: a delete's answer, its state `deleted`. */
     public String deletedAt;
+
+    /** When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted. */
+    public String deleteAt;
+
+    /** Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does. */
+    public String deleteWaitsFor;
+
+    /** Whether its delete is refused (409 `delete_protected`) until an update turns this off. */
+    public Boolean deleteProtection;
 
     public Stored id(String v) {
       this.id = v;
@@ -2893,6 +3250,21 @@ public final class Sandboxes {
       return this;
     }
 
+    public Stored deleteAt(String v) {
+      this.deleteAt = v;
+      return this;
+    }
+
+    public Stored deleteWaitsFor(String v) {
+      this.deleteWaitsFor = v;
+      return this;
+    }
+
+    public Stored deleteProtection(Boolean v) {
+      this.deleteProtection = v;
+      return this;
+    }
+
     static Stored of(Object raw) {
       Map<String, Object> m = KitJson.object(raw);
       Stored o = new Stored();
@@ -2910,6 +3282,9 @@ public final class Sandboxes {
       o.tags = KitJson.asStringList(m.get("tags"));
       o.error = KitJson.asString(m.get("error"));
       o.deletedAt = KitJson.asString(m.get("deletedAt"));
+      o.deleteAt = KitJson.asString(m.get("deleteAt"));
+      o.deleteWaitsFor = KitJson.asString(m.get("deleteWaitsFor"));
+      o.deleteProtection = (m.get("deleteProtection") instanceof Boolean b ? b : null);
       return o;
     }
 
@@ -2929,6 +3304,9 @@ public final class Sandboxes {
       if (tags != null) m.put("tags", tags);
       if (error != null) m.put("error", error);
       if (deletedAt != null) m.put("deletedAt", deletedAt);
+      if (deleteAt != null) m.put("deleteAt", deleteAt);
+      if (deleteWaitsFor != null) m.put("deleteWaitsFor", deleteWaitsFor);
+      if (deleteProtection != null) m.put("deleteProtection", deleteProtection);
       return m;
     }
   }
@@ -2941,13 +3319,13 @@ public final class Sandboxes {
     /** Its labels, in place of its own; those under `runtime.` are kept. */
     public Map<String, String> labels;
 
-    /** Seconds with nothing happening before it pauses, 60 to 86400; 0 never. */
+    /** Seconds with nothing happening before it pauses, 60 to 86400; 0 never. Nothing happening means no call or command running, no traffic, almost no CPU, and no outbound connection it opened still open. */
     public Long idlePauseSeconds;
 
-    /** Its vCPUs, grown while it runs; a running sandbox's vCPUs only grow. At least 1. */
+    /** Its vCPUs, grown while it runs; a running machine's vCPUs only grow. At least 1. */
     public Long vcpu;
 
-    /** Its memory in GB (1 GB is 1,024 MiB), grown while it runs; a running sandbox's memory only grows. At least 1. */
+    /** Its memory in GB (1 GB is 1,024 MiB), grown while it runs; a running machine's memory only grows. At least 1. */
     public Double memoryGB;
 
     /** Its disk in GB (1 GB is 1,024 MiB), grown while it runs, its file system with it; a disk only grows. At least 1. */
@@ -2964,6 +3342,15 @@ public final class Sandboxes {
 
     /** The most it may cost in all, in US dollars (`"5.00"`), in place of its own: one paused at its old maxCost wakes at its next call under a higher one. */
     public String maxCost;
+
+    /** Whether a call that reaches it paused (an exec, a file, a terminal, a preview's visitor) resumes it from now. false: such a call answers 409 sandbox_paused and it stays paused until its own `:resume`. */
+    public Boolean autoWake;
+
+    /** Seconds from now until Runtime deletes it, as its delete does: final, and it can't be undone. Sent again before then, it renews it; 0 takes its end off (kept until deleted). At least 0. At most 315360000. */
+    public Long deleteAfterSeconds;
+
+    /** true refuses its delete (409 `delete_protected`) until an update sends false; while true, its time limit pauses it instead of deleting it. Not while it has a `deleteAt`, unless the same update sends `deleteAfterSeconds` 0. */
+    public Boolean deleteProtection;
 
     public MachineUpdate name(String v) {
       this.name = v;
@@ -3015,6 +3402,21 @@ public final class Sandboxes {
       return this;
     }
 
+    public MachineUpdate autoWake(Boolean v) {
+      this.autoWake = v;
+      return this;
+    }
+
+    public MachineUpdate deleteAfterSeconds(Long v) {
+      this.deleteAfterSeconds = v;
+      return this;
+    }
+
+    public MachineUpdate deleteProtection(Boolean v) {
+      this.deleteProtection = v;
+      return this;
+    }
+
     static MachineUpdate of(Object raw) {
       Map<String, Object> m = KitJson.object(raw);
       MachineUpdate o = new MachineUpdate();
@@ -3028,6 +3430,9 @@ public final class Sandboxes {
       o.env = KitJson.asStringMap(m.get("env"));
       o.removeEnv = KitJson.asStringList(m.get("removeEnv"));
       o.maxCost = KitJson.asString(m.get("maxCost"));
+      o.autoWake = (m.get("autoWake") instanceof Boolean b ? b : null);
+      o.deleteAfterSeconds = KitJson.asLong(m.get("deleteAfterSeconds"));
+      o.deleteProtection = (m.get("deleteProtection") instanceof Boolean b ? b : null);
       return o;
     }
 
@@ -3043,6 +3448,9 @@ public final class Sandboxes {
       if (env != null) m.put("env", env);
       if (removeEnv != null) m.put("removeEnv", removeEnv);
       if (maxCost != null) m.put("maxCost", maxCost);
+      if (autoWake != null) m.put("autoWake", autoWake);
+      if (deleteAfterSeconds != null) m.put("deleteAfterSeconds", deleteAfterSeconds);
+      if (deleteProtection != null) m.put("deleteProtection", deleteProtection);
       return m;
     }
   }
@@ -4076,6 +4484,11 @@ public final class Sandboxes {
     return Process.of(t.request("POST", "/v2/sandboxes/" + Transport.path(id) + "/processes/" + Transport.path(process) + ":signal", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
+  /** Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe. */
+  public Process resizeProcess(String id, String process, Terminal input, Transport.RequestOptions opts) {
+    return Process.of(t.request("POST", "/v2/sandboxes/" + Transport.path(id) + "/processes/" + Transport.path(process) + ":resize", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
+  }
+
   /** Lists a sandbox's processes, newest first: those running and those that ended lately. */
   public ProcessList listProcesses(String id, Transport.RequestOptions opts) {
     return ProcessList.of(t.request("GET", "/v2/sandboxes/" + Transport.path(id) + "/processes", null, null, new Transport.Call(true, null), opts));
@@ -4171,7 +4584,7 @@ public final class Sandboxes {
     return Stored.of(t.request("POST", "/v2/sandboxes/" + Transport.path(id) + ":snapshot", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
-  /** Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. */
+  /** Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused. */
   public Sandbox update(String id, MachineUpdate input, Transport.RequestOptions opts) {
     return Sandbox.of(t.request("POST", "/v2/sandboxes/" + Transport.path(id) + ":update", null, input == null ? null : input.toMap(), new Transport.Call(false, null), opts));
   }

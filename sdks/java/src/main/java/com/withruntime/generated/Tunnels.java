@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** A WireGuard tunnel from your own network into your sandboxes. */
+/** A WireGuard tunnel from your own network into your machines. */
 public final class Tunnels {
   private final Transport t;
 
@@ -29,7 +29,7 @@ public final class Tunnels {
     /** Its address in the tunnel's subnet. */
     public String address;
 
-    /** The org's own ranges behind it that sandboxes may reach. */
+    /** The org's own ranges behind it that machines may reach. */
     public List<String> routes;
 
     /** When it was added. */
@@ -99,9 +99,9 @@ public final class Tunnels {
     }
   }
 
-  /** A sandbox's address in a tunnel's subnet. */
+  /** A machine's address in a tunnel's subnet. */
   public static final class TunnelMember {
-    /** The sandbox. */
+    /** The machine. */
     public String sandboxId;
 
     /** Its address in the subnet. */
@@ -153,7 +153,7 @@ public final class Tunnels {
     /** The org's machines and routers on it. */
     public List<TunnelPeer> peers;
 
-    /** Each sandbox's address in the subnet. */
+    /** Each machine's address in the subnet. */
     public List<TunnelMember> members;
 
     public TunnelSettings subnet(String v) {
@@ -217,7 +217,7 @@ public final class Tunnels {
     }
   }
 
-  /** A WireGuard tunnel from the org's own network into its sandboxes. */
+  /** A WireGuard tunnel from the org's own network into its machines. */
   public static final class Tunnel {
     /** Its private IPv4 range, /16 to /24. */
     public String subnet;
@@ -237,7 +237,7 @@ public final class Tunnels {
     /** The org's machines and routers on it. */
     public List<TunnelPeer> peers;
 
-    /** Each sandbox's address in the subnet. */
+    /** Each machine's address in the subnet. */
     public List<TunnelMember> members;
 
     /** Its ID. */

@@ -82,9 +82,9 @@ func (c *Otel) List(ctx context.Context, q ExportListQuery, opts *RequestOptions
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Otel) ListAll(ctx context.Context, q ExportListQuery, opts *RequestOptions) iter.Seq2[Export, error] {
-	return all(func(cursor *string) (*Page[Export], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Export], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

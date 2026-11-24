@@ -1,6 +1,6 @@
 # Secrets
 
-Code in a sandbox, such as an agent's, should never hold your API keys: anything it can read, it can leak. A secret keeps the key outside the sandbox. The sandbox holds a placeholder, and Runtime puts the real value in the request as it leaves for the hosts you name, over HTTPS.
+Code in a machine, such as an agent's, should never hold your API keys: anything it can read, it can leak. A secret keeps the key outside the machine. The machine holds a placeholder, and Runtime puts the real value in the request as it leaves for the hosts you name, over HTTPS.
 
 ## Store a secret
 
@@ -15,7 +15,7 @@ Code in a sandbox, such as an agent's, should never hold your API keys: anything
 | [`envName`](./reference/secrets#secretset) | The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name. |
 | [`scope`](./reference/secrets#secretset) | The machines that may use it; every machine of the organization when omitted. |
 
-The answer, a [Secret](./reference/secrets#secret), never holds the value: [`placeholder`](./reference/secrets#secret) is what a sandbox holds in its place.
+The answer, a [Secret](./reference/secrets#secret), never holds the value: [`placeholder`](./reference/secrets#secret) is what a machine holds in its place.
 
 ```bash
 curl -X PUT https://api.withruntime.com/v2/secrets/OPENAI_API_KEY \
@@ -24,17 +24,17 @@ curl -X PUT https://api.withruntime.com/v2/secrets/OPENAI_API_KEY \
   -d '{"value": "sk-...", "hosts": ["api.openai.com"], "scope": {"labelsAny": [{"team": "agents"}]}}'
 ```
 
-## Which sandboxes get it
+## Which machines get it
 
-- Scope every secret. When [`scope`](./reference/secrets#secretset) is left out, The machines that may use it; every machine of the organization when omitted. Scope a secret to the labels of the sandboxes that need it: Machines with every label of any one of these sets.
-- A sandbox can narrow what it gets further at create: [`secrets`](./reference/sandboxes#sandboxcreate): The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it.
+- Scope every secret. When [`scope`](./reference/secrets#secretset) is left out, The machines that may use it; every machine of the organization when omitted. Scope a secret to the labels of the machines that need it: Machines with every label of any one of these sets. Give this or `none`.
+- A machine can narrow what it gets further at create: [`secrets`](./reference/sandboxes#sandboxcreate): The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it.
 - [`PUT /v2/secrets/{name}`](./reference/secrets#set) without the value changes a stored secret's hosts, rules or scope and keeps the rest: hosts and rules only narrow, since widening needs the value.
-- [`DELETE /v2/secrets/{name}`](./reference/secrets#delete-a-secret) removes it. Sandboxes that held its placeholder can no longer use it.
+- [`DELETE /v2/secrets/{name}`](./reference/secrets#delete-a-secret) removes it. Machines that held its placeholder can no longer use it.
 
 ## Give this to your agent
 
 Paste this into your coding agent:
 
-> Read https://withruntime.com/docs/secrets.md. Store each API key this project's sandboxed code uses as a Runtime secret for the hosts it calls, scope each to the sandboxes that need it, and remove the keys from the sandboxes' environment and files.
+> Read https://withruntime.com/docs/secrets.md. Store each API key this project's code on Runtime uses as a Runtime secret for the hosts it calls, scope each to the machines that need it, and remove the keys from the machines' environment and files.
 >
 > This page as Markdown: https://withruntime.com/docs/secrets.md

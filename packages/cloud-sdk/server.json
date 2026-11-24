@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "com.withruntime/runtime",
   "title": "Runtime Cloud",
-  "description": "Linux microVM sandboxes for AI agents: run commands, files, processes, pause and wake.",
+  "description": "Linux microVMs for AI agents: run commands, read and write files, pause and resume.",
   "websiteUrl": "https://withruntime.com/docs/mcp",
   "repository": {
     "url": "https://github.com/withruntime/runtime",
@@ -10,13 +10,13 @@
     "source": "github",
     "subfolder": "packages/cloud-sdk"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "withruntime",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "runtimeHint": "npx",
       "transport": { "type": "stdio" },
       "packageArguments": [{ "type": "positional", "value": "mcp" }]

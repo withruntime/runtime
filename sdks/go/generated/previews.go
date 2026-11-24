@@ -10,9 +10,9 @@ import (
 	"strconv"
 )
 
-// PreviewCreate A preview of the sandbox its path names to create, or its visibility and sites to change.
+// PreviewCreate A preview of the machine its path names to create, or its visibility and sites to change.
 type PreviewCreate struct {
-	// Port The port inside the sandbox. At least 1. At most 65535.
+	// Port The port inside the machine. At least 1. At most 65535.
 	Port int64 `json:"port"`
 	// Visibility `private` (default): a token is needed. `public`: anyone with the address.
 	Visibility *string `json:"visibility,omitempty"`
@@ -26,11 +26,13 @@ type PreviewCreate struct {
 type PreviewInfo struct {
 	// ID Its ID.
 	ID string `json:"id"`
+	// Name Its hostname, `<port>-<sandbox hex>.<domain>`: its own calls (`/v2/previews/{name}`) take it or its ID.
+	Name string `json:"name"`
 	// Object Always `preview`.
 	Object string `json:"object"`
-	// SandboxID The sandbox whose port it shares.
+	// SandboxID The machine whose port it shares.
 	SandboxID string `json:"sandboxId"`
-	// Port The port inside the sandbox.
+	// Port The port inside the machine.
 	Port int64 `json:"port"`
 	// Visibility `private` or `public`.
 	Visibility string `json:"visibility"`
@@ -52,7 +54,7 @@ type PreviewInfo struct {
 
 // PreviewListQuery is what List takes in its query.
 type PreviewListQuery struct {
-	// SandboxID The sandbox whose previews to list.
+	// SandboxID The machine whose previews to list.
 	SandboxID string
 	// Cursor Where the page starts: a page's `next`.
 	Cursor *string
@@ -72,6 +74,25 @@ func (q PreviewListQuery) values() url.Values {
 	return v
 }
 
+// PreviewGetQuery is what Get takes in its query.
+type PreviewGetQuery struct {
+	// Wait Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60.
+	Wait *float64
+	// IfState The state the caller last read, which `wait` waits for it to leave.
+	IfState *string
+}
+
+func (q PreviewGetQuery) values() url.Values {
+	v := url.Values{}
+	if q.Wait != nil {
+		v.Set("wait", strconv.FormatFloat(*q.Wait, 'f', -1, 64))
+	}
+	if q.IfState != nil {
+		v.Set("ifState", *q.IfState)
+	}
+	return v
+}
+
 // PreviewSignQuery is what Sign takes in its query.
 type PreviewSignQuery struct {
 	// TtlSeconds The token's lifetime in seconds, from 60 until the calling key's own end (a year at most); a day when omitted, or the key's end when that is sooner. At least 60. At most 31536000. Default: 86400.
@@ -86,12 +107,12 @@ func (q PreviewSignQuery) values() url.Values {
 	return v
 }
 
-// Previews A port of a sandbox at a public HTTPS address: private with a signed token, or public.
+// Previews A port of a machine at a public HTTPS address: private with a signed token, or public.
 type Previews struct {
 	t *Transport
 }
 
-// Create Shares a port of a sandbox at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview.
+// Create Shares a port of a machine at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview.
 func (c *Previews) Create(ctx context.Context, id string, in PreviewCreate, opts *RequestOptions) (*Preview, error) {
 	out := new(PreviewInfo)
 	if err := c.t.Do(ctx, "POST", "/v2/sandboxes/"+url.PathEscape(id)+"/previews", nil, in, Call{}, opts, out); err != nil {
@@ -100,7 +121,7 @@ func (c *Previews) Create(ctx context.Context, id string, in PreviewCreate, opts
 	return newPreview(c, out), nil
 }
 
-// List Lists a sandbox's previews, lowest port first.
+// List Lists a machine's previews, lowest port first.
 func (c *Previews) List(ctx context.Context, q PreviewListQuery, opts *RequestOptions) (*Page[PreviewInfo], error) {
 	out := new(Page[PreviewInfo])
 	if err := c.t.Do(ctx, "GET", "/v2/previews", q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
@@ -109,18 +130,18 @@ func (c *Previews) List(ctx context.Context, q PreviewListQuery, opts *RequestOp
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Previews) ListAll(ctx context.Context, q PreviewListQuery, opts *RequestOptions) iter.Seq2[PreviewInfo, error] {
-	return all(func(cursor *string) (*Page[PreviewInfo], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[PreviewInfo], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
 }
 
 // Get Returns a preview; `sign` returns one with a token.
-func (c *Previews) Get(ctx context.Context, name string, opts *RequestOptions) (*Preview, error) {
+func (c *Previews) Get(ctx context.Context, name string, q PreviewGetQuery, opts *RequestOptions) (*Preview, error) {
 	out := new(PreviewInfo)
-	if err := c.t.Do(ctx, "GET", "/v2/previews/"+url.PathEscape(name), nil, nil, Call{Idempotent: true}, opts, out); err != nil {
+	if err := c.t.Do(ctx, "GET", "/v2/previews/"+url.PathEscape(name), q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
 	return newPreview(c, out), nil
@@ -153,7 +174,7 @@ func (c *Previews) Delete(ctx context.Context, name string, opts *RequestOptions
 	return out, nil
 }
 
-// Preview is one of previews: A port of a sandbox at a public HTTPS address: private with a signed token, or public.
+// Preview is one of previews: A port of a machine at a public HTTPS address: private with a signed token, or public.
 type Preview struct {
 	c *Previews
 	// Info is what it was when last read.
@@ -164,12 +185,19 @@ func newPreview(c *Previews, info *PreviewInfo) *Preview {
 	return &Preview{c: c, Info: info}
 }
 
+// Name is its name.
+func (s *Preview) Name() string { return s.Info.Name }
+
 // ID is its id.
 func (s *Preview) ID() string { return s.Info.ID }
 
 // Refresh Returns a preview; `sign` returns one with a token.
-func (s *Preview) Refresh(ctx context.Context, opts *RequestOptions) error {
-	got, err := s.c.Get(ctx, s.Info.ID, opts)
+func (s *Preview) Refresh(ctx context.Context, q *PreviewGetQuery, opts *RequestOptions) error {
+	var qb PreviewGetQuery
+	if q != nil {
+		qb = *q
+	}
+	got, err := s.c.Get(ctx, s.Info.Name, qb, opts)
 	if err != nil {
 		return err
 	}
@@ -183,7 +211,7 @@ func (s *Preview) Sign(ctx context.Context, q *PreviewSignQuery, opts *RequestOp
 	if q != nil {
 		qb = *q
 	}
-	got, err := s.c.Sign(ctx, s.Info.ID, qb, opts)
+	got, err := s.c.Sign(ctx, s.Info.Name, qb, opts)
 	if err != nil {
 		return err
 	}
@@ -193,7 +221,7 @@ func (s *Preview) Sign(ctx context.Context, q *PreviewSignQuery, opts *RequestOp
 
 // Rotate Refuses every token signed for a preview so far, and returns a new one.
 func (s *Preview) Rotate(ctx context.Context, opts *RequestOptions) error {
-	got, err := s.c.Rotate(ctx, s.Info.ID, opts)
+	got, err := s.c.Rotate(ctx, s.Info.Name, opts)
 	if err != nil {
 		return err
 	}
@@ -203,5 +231,5 @@ func (s *Preview) Rotate(ctx context.Context, opts *RequestOptions) error {
 
 // Delete Stops sharing a port.
 func (s *Preview) Delete(ctx context.Context, opts *RequestOptions) (*PreviewInfo, error) {
-	return s.c.Delete(ctx, s.Info.ID, opts)
+	return s.c.Delete(ctx, s.Info.Name, opts)
 }

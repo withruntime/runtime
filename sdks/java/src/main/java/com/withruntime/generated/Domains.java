@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Your own hostname serving a sandbox's port, with HTTPS. */
+/** Your own hostname serving a machine's port, with HTTPS. */
 public final class Domains {
   private final Transport t;
 
@@ -15,15 +15,15 @@ public final class Domains {
     this.t = t;
   }
 
-  /** A custom domain to add, or to point at another sandbox or port. */
+  /** A custom domain to add, or to point at another machine or port. */
   public static final class DomainCreate {
     /** The hostname, at most 253 characters. */
     public String hostname;
 
-    /** The sandbox to serve. */
+    /** The machine to serve. */
     public String sandboxId;
 
-    /** The port inside the sandbox, 1 to 65535. */
+    /** The port inside the machine, 1 to 65535. */
     public Long port;
 
     public DomainCreate hostname(String v) {
@@ -61,7 +61,7 @@ public final class Domains {
 
   /** A custom domain's settings, as it keeps them: the port it serves, and its proof of ownership as facts. */
   public static final class DomainSettings {
-    /** The port inside the sandbox. At least 1. At most 65535. */
+    /** The port inside the machine. At least 1. At most 65535. */
     public Long port;
 
     /** The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`. */
@@ -123,9 +123,9 @@ public final class Domains {
     }
   }
 
-  /** A custom domain: your own hostname serving a sandbox's port. */
+  /** A custom domain: your own hostname serving a machine's port. */
   public static final class Domain {
-    /** The port inside the sandbox. At least 1. At most 65535. */
+    /** The port inside the machine. At least 1. At most 65535. */
     public Long port;
 
     /** The token the TXT record at `_runtime-challenge.<hostname>` holds as `runtime-verify=<token>`. */
@@ -149,7 +149,7 @@ public final class Domains {
     /** The hostname, lower case. */
     public String hostname;
 
-    /** The sandbox it serves. */
+    /** The machine it serves. */
     public String sandboxId;
 
     /** Its state: `ready` once every serving host routes it. */
@@ -303,7 +303,33 @@ public final class Domains {
     }
   }
 
-  /** Adds a hostname to serve a sandbox's port, checks its TXT record, and returns the DNS records to set. Asked again with another sandbox or port, it points the name there. */
+  /** What get takes in its query. */
+  public static final class DomainGetQuery {
+    /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+    public Double wait;
+
+    /** The state the caller last read, which `wait` waits for it to leave. */
+    public String ifState;
+
+    public DomainGetQuery wait(Double v) {
+      this.wait = v;
+      return this;
+    }
+
+    public DomainGetQuery ifState(String v) {
+      this.ifState = v;
+      return this;
+    }
+
+    Map<String, Object> query() {
+      Map<String, Object> q = new LinkedHashMap<>();
+      if (wait != null) q.put("wait", String.valueOf(wait));
+      if (ifState != null) q.put("ifState", String.valueOf(ifState));
+      return q;
+    }
+  }
+
+  /** Adds a hostname to serve a machine's port, checks its TXT record, and returns the DNS records to set. Asked again with another machine or port, it points the name there. */
   public Domain create(DomainCreate input, Transport.RequestOptions opts) {
     return Domain.of(t.request("POST", "/v2/domains", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
@@ -314,8 +340,8 @@ public final class Domains {
   }
 
   /** Returns a custom domain and the DNS records it needs. */
-  public Domain get(String hostname, Transport.RequestOptions opts) {
-    return Domain.of(t.request("GET", "/v2/domains/" + Transport.path(hostname), null, null, new Transport.Call(true, null), opts));
+  public Domain get(String hostname, DomainGetQuery query, Transport.RequestOptions opts) {
+    return Domain.of(t.request("GET", "/v2/domains/" + Transport.path(hostname), query == null ? null : query.query(), null, new Transport.Call(true, null), opts));
   }
 
   /** Checks the TXT record now; the name is served once it matches. */

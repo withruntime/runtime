@@ -5,68 +5,68 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # A private network's settings, as it keeps them.
-    # - +members+: The machines in it, by ID; none for every sandbox of the org.
-    NetworkSettings = Struct.new(:members, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A private network's settings, as it keeps them.
+  # - +members+: The machines in it, by ID; none for every machine of the org.
+  NetworkSettings = Struct.new(:members, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          members: h["members"],
-        )
-      end
-
-      def to_wire
-        {
-          "members" => self.members,
-        }.compact
-      end
+      new(
+        members: h["members"],
+      )
     end
 
-    # A private network: its members reach each other at `<id>.sandbox.internal`, over TCP.
-    # - +members+: The machines in it, by ID; none for every sandbox of the org.
-    # - +id+: Its ID.
-    # - +object+: Always `network`.
-    # - +name+: Its name.
-    # - +state+: Its state: `ready` once every member's host serves it.
-    # - +created_at+: When it was made.
-    Network = Struct.new(:members, :id, :object, :name, :state, :created_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "members" => self.members,
+      }.compact
+    end
+  end
 
-        new(
-          members: h["members"],
-          id: h["id"],
-          object: h["object"],
-          name: h["name"],
-          state: h["state"],
-          created_at: h["createdAt"],
-        )
-      end
+  # A private network: its members reach each other at `<id>.sandbox.internal`, over TCP.
+  # - +members+: The machines in it, by ID; none for every machine of the org.
+  # - +id+: Its ID.
+  # - +object+: Always `network`.
+  # - +name+: Its name.
+  # - +state+: Its state: `ready` once every member's host serves it.
+  # - +created_at+: When it was made.
+  Network = Struct.new(:members, :id, :object, :name, :state, :created_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "members" => self.members,
-          "id" => self.id,
-          "object" => self.object,
-          "name" => self.name,
-          "state" => self.state,
-          "createdAt" => self.created_at,
-        }.compact
-      end
+      new(
+        members: h["members"],
+        id: h["id"],
+        object: h["object"],
+        name: h["name"],
+        state: h["state"],
+        created_at: h["createdAt"],
+      )
     end
 
-    # A private network: its sandboxes reach each other by name, over TCP.
-    class Networks
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "members" => self.members,
+        "id" => self.id,
+        "object" => self.object,
+        "name" => self.name,
+        "state" => self.state,
+        "createdAt" => self.created_at,
+      }.compact
+    end
+  end
 
-      # Lists the org's private networks, by name.
-      def list(cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/networks", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Network.from(i) }
-      end
+  # A private network: its machines reach each other by name, over TCP.
+  class Networks
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Lists the org's private networks, by name.
+    def list(cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/networks", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Network.from(i) }
     end
   end
 end

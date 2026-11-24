@@ -6,8 +6,10 @@ import { Paginated } from "./runtime.js";
 
 /** Which machines may use a secret. */
 export interface SecretScope {
-  /** Machines with every label of any one of these sets. */
-  labelsAny: Record<string, string>[];
+  /** Machines with every label of any one of these sets. Give this or `none`. */
+  labelsAny?: Record<string, string>[];
+  /** `true`: no machine. Runtime alone uses the secret: it is in no machine's requests or environment. A registry login an image import pulls with (`pullSecret`) has this scope. Give this or `labelsAny`. */
+  none?: boolean;
 }
 
 /** Which requests to a secret's hosts may carry it. */
@@ -100,6 +102,14 @@ export type SecretListQuery = {
   limit?: number;
 };
 
+/** What get takes in its query. */
+export type SecretGetQuery = {
+  /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+  wait?: number;
+  /** The state the caller last read, which `wait` waits for it to leave. */
+  ifState?: string;
+};
+
 /** One of secrets: A value a machine uses, sealed at rest and never answered. Hidden (the default): the machine sees a placeholder, and the egress proxy puts the value in its place, only on HTTPS to the secret's hosts. Visible: the machine holds the value, in its environment variable and in /run/secrets/<envName>. */
 export class Secret {
   readonly #c: Secrets;
@@ -116,9 +126,79 @@ export class Secret {
     return this.info.name;
   }
 
+  /** The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted. */
+  get visible(): boolean | undefined {
+    return this.info.visible;
+  }
+
+  /** The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible. */
+  get hosts(): string[] | undefined {
+    return this.info.hosts;
+  }
+
+  /** The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only. */
+  get header(): string | undefined {
+    return this.info.header;
+  }
+
+  /** The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only. */
+  get format(): string | undefined {
+    return this.info.format;
+  }
+
+  /** The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name. */
+  get envName(): string | undefined {
+    return this.info.envName;
+  }
+
+  /** The machines that may use it; every machine of the organization when omitted. */
+  get scope(): SecretScope | undefined {
+    return this.info.scope;
+  }
+
+  /** How it may be used. Hidden secrets only. */
+  get policies(): SecretPolicies | undefined {
+    return this.info.policies;
+  }
+
+  /** Always `secret`. */
+  get object(): "secret" | (string & {}) {
+    return this.info.object;
+  }
+
+  /** `active` while requests carry it; `deleted` once deleted: a delete's answer. */
+  get state(): "active" | "deleted" | (string & {}) {
+    return this.info.state;
+  }
+
+  /** What a machine holds in the value's place; none when visible. */
+  get placeholder(): string | undefined {
+    return this.info.placeholder;
+  }
+
+  /** Raised by each change. */
+  get version(): number {
+    return this.info.version;
+  }
+
+  /** Its value's length in bytes. */
+  get valueBytes(): number | undefined {
+    return this.info.valueBytes;
+  }
+
+  /** When it was last changed. */
+  get updatedAt(): string | undefined {
+    return this.info.updatedAt;
+  }
+
+  /** When it was deleted: a delete's answer, its state `deleted`. */
+  get deletedAt(): string | undefined {
+    return this.info.deletedAt;
+  }
+
   /** Returns a secret, without its value. */
-  async refresh(options?: RequestOptions): Promise<this> {
-    this.info = await (await this.#c.get(this.name, options)).info;
+  async refresh(query: SecretGetQuery & RequestOptions = {}, options?: RequestOptions): Promise<this> {
+    this.info = (await this.#c.get(this.name, query, options)).info;
     return this;
   }
 
@@ -132,32 +212,37 @@ export class Secret {
   delete(options?: RequestOptions): Promise<SecretInfo> {
     return this.#c.delete(this.name, options);
   }
+
+  /** Deletes it when the `await using` block that holds it ends. */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.delete();
+  }
 }
 
 /** A value a machine uses, sealed at rest and never answered. Hidden (the default): the machine sees a placeholder, and the egress proxy puts the value in its place, only on HTTPS to the secret's hosts. Visible: the machine holds the value, in its environment variable and in /run/secrets/<envName>. */
 export class Secrets {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the organization's secrets by name, without their values. */
-  list(query: SecretListQuery = {}, options?: RequestOptions): Paginated<SecretInfo> {
-    return new Paginated<SecretInfo>((cursor) => this.#t.request<Page<SecretInfo>>("GET", `/v2/secrets`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: SecretListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<SecretInfo> {
+    return new Paginated<SecretInfo>((cursor) => this.transport.request<Page<SecretInfo>>("GET", `/v2/secrets`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 
   /** Returns a secret, without its value. */
-  async get(name: string, options?: RequestOptions): Promise<Secret> {
-    return new Secret(this, await this.#t.request<SecretInfo>("GET", `/v2/secrets/${encodeURIComponent(name)}`, { options, idempotent: true }));
+  async get(name: string, query: SecretGetQuery & RequestOptions = {}, options?: RequestOptions): Promise<Secret> {
+    return new Secret(this, await this.transport.request<SecretInfo>("GET", `/v2/secrets/${encodeURIComponent(name)}`, { query: { ...query }, options, idempotent: true }));
   }
 
   /** Stores or replaces a secret with its value, or changes one without it. Replacing it keeps its placeholder and raises its version; machines' new requests carry the new value within a second, and a visible secret's file holds it within a second. A running machine's processes keep the environment they started with; new commands get the new one. Asked again with the same Idempotency-Key and body, it returns the secret as that request left it. A deleted secret's name stored again is a new secret with a new placeholder, and so is a visible secret stored hidden. Without its value, it changes only the hosts, rules (`policies.rules`) and scope it names and keeps every other setting: hosts and rules only narrow, refused 400 when wider, since widening needs the value; a visible secret's scope only narrows, since its machines hold its value, and its file is removed within a second from each machine the scope leaves out. A secret not stored yet needs its value (404). */
   set(name: string, input: SecretSet = {}, options?: RequestOptions): Promise<SecretInfo> {
-    return this.#t.request<SecretInfo>("PUT", `/v2/secrets/${encodeURIComponent(name)}`, { body: input, options, idempotent: true });
+    return this.transport.request<SecretInfo>("PUT", `/v2/secrets/${encodeURIComponent(name)}`, { body: input, options, idempotent: true });
   }
 
   /** Deletes a secret and its value: no request carries it from then on, open connections' included, and a visible secret's file is removed from every machine within a second. Deleted again, it returns the same deleted secret. */
   delete(name: string, options?: RequestOptions): Promise<SecretInfo> {
-    return this.#t.request<SecretInfo>("DELETE", `/v2/secrets/${encodeURIComponent(name)}`, { options, idempotent: true });
+    return this.transport.request<SecretInfo>("DELETE", `/v2/secrets/${encodeURIComponent(name)}`, { options, idempotent: true });
   }
 }

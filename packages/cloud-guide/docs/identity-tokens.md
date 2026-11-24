@@ -1,10 +1,10 @@
 # Identity tokens
 
-Code in a sandbox can prove which sandbox it is without a stored key. Runtime signs a short-lived OpenID Connect ID token that names the sandbox, its organization, its project and its image. Your AWS or Google Cloud account trusts Runtime's issuer once, then lets a sandbox assume a role with the token. Your own API can accept it too.
+Code in a machine can prove which machine it is without a stored key. Runtime signs a short-lived OpenID Connect ID token that names the machine, its organization, its project and its image. Your AWS or Google Cloud account trusts Runtime's issuer once, then lets a machine assume a role with the token. Your own API can accept it too.
 
 ## Get a token
 
-Inside a sandbox, with no API key. Every sandbox's environment has `RUNTIME_ID_TOKEN_REQUEST_URL` and `RUNTIME_ID_TOKEN_REQUEST_TOKEN`:
+Inside a machine, with no API key. Every machine's environment has `RUNTIME_ID_TOKEN_REQUEST_URL` and `RUNTIME_ID_TOKEN_REQUEST_TOKEN`:
 
 ```bash
 curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
@@ -12,20 +12,29 @@ curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
 ```
 
 ```ts
-import { Sandbox } from "withruntime";
-
-const { token, subject } = await Sandbox.identityToken({ audience: "sts.amazonaws.com" });
+const url = `${process.env.RUNTIME_ID_TOKEN_REQUEST_URL}?audience=sts.amazonaws.com`;
+const answer = await fetch(url, {
+  headers: { Authorization: `Bearer ${process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN}` },
+});
+const { token, subject, expiresAt } = await answer.json();
 ```
 
 ```python
-from withruntime import Sandbox
+import json
+import os
+import urllib.request
 
-token = Sandbox.identity_token("sts.amazonaws.com")
+url = os.environ["RUNTIME_ID_TOKEN_REQUEST_URL"] + "?audience=sts.amazonaws.com"
+auth = {"Authorization": "Bearer " + os.environ["RUNTIME_ID_TOKEN_REQUEST_TOKEN"]}
+with urllib.request.urlopen(urllib.request.Request(url, headers=auth)) as answer:
+    token = json.load(answer)["token"]
 ```
 
+The answer is JSON: `token`, `expiresAt`, `issuer`, `subject` and `audience`.
+
 - `audience` is required: who the token is for. Use `sts.amazonaws.com` for AWS, your workload identity provider's name for Google Cloud, or your API's name.
-- `lifetimeSeconds` sets how long the token lasts. Ask for a fresh one when it expires.
-- Only a running sandbox gets a token, and only for itself: Runtime knows the sandbox by the connection it asks on, never by anything the request says.
+- `lifetimeSeconds` sets how long the token lasts, 60 to 3,600 seconds. Ask for a fresh one when it expires.
+- Only a running machine gets a token, and only for itself: Runtime knows the machine by the connection it asks on, never by anything the request says.
 - A program started without the two variables reads them from `http://runtime.internal/v1/environment` (JSON).
 
 ## What a token says
@@ -35,13 +44,13 @@ token = Sandbox.identity_token("sts.amazonaws.com")
 | `iss` | `https://withruntime.com/oidc` |
 | `sub` | `org:<org-id>:image:<image>:sandbox:<sandbox-id>` |
 | `aud` | The audience you asked for |
-| `org_id`, `project_id` | The sandbox's organization and project |
-| `sandbox_id`, `sandbox_name` | The sandbox, and its name if it has one |
+| `org_id`, `project_id` | The machine's organization and project |
+| `sandbox_id`, `sandbox_name` | The machine, and its name if it has one |
 | `image`, `image_id` | The image's name (`base` for none of your own) and its id |
 | `funding`, `region`, `runtime_environment` | `paid`, where it runs, and `production` |
 | `iat`, `nbf`, `exp`, `jti` | When it was issued, from when and until when it holds, and its own id |
 
-A trust policy matches on `sub`: `org:<org-id>:*` is every sandbox of an organization, and `org:<org-id>:image:<name>:*` every sandbox made from one image.
+A trust policy matches on `sub`: `org:<org-id>:*` is every machine of an organization, and `org:<org-id>:image:<name>:*` every machine made from one image.
 
 ## Trust Runtime in AWS
 
@@ -59,7 +68,7 @@ Add an OpenID Connect identity provider with the provider URL `https://withrunti
 }
 ```
 
-In the sandbox, write the token to a file and set `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_ARN`: every AWS SDK and the CLI then assume the role by themselves.
+In the machine, write the token to a file and set `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_ARN`: every AWS SDK and the CLI then assume the role by themselves.
 
 ## Trust Runtime in Google Cloud
 
@@ -73,6 +82,6 @@ The issuer's discovery document is `https://withruntime.com/oidc/.well-known/ope
 
 Paste this into your coding agent:
 
-> Read https://withruntime.com/docs/identity-tokens.md. Replace every cloud access key this project's sandboxed code holds with an identity token: trust Runtime's issuer once in the cloud account, give the role a trust policy that names this organization's sandboxes, and get credentials from the token in the sandbox.
+> Read https://withruntime.com/docs/identity-tokens.md. Replace every cloud access key this project's code on Runtime holds with an identity token: trust Runtime's issuer once in the cloud account, give the role a trust policy that names this organization's machines, and get credentials from the token in the machine.
 >
 > This page as Markdown: https://withruntime.com/docs/identity-tokens.md

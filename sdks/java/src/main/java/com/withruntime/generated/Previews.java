@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** A port of a sandbox at a public HTTPS address: private with a signed token, or public. */
+/** A port of a machine at a public HTTPS address: private with a signed token, or public. */
 public final class Previews {
   private final Transport t;
 
@@ -15,9 +15,9 @@ public final class Previews {
     this.t = t;
   }
 
-  /** A preview of the sandbox its path names to create, or its visibility and sites to change. */
+  /** A preview of the machine its path names to create, or its visibility and sites to change. */
   public static final class PreviewCreate {
-    /** The port inside the sandbox. At least 1. At most 65535. */
+    /** The port inside the machine. At least 1. At most 65535. */
     public Long port;
 
     /** `private` (default): a token is needed. `public`: anyone with the address. */
@@ -74,13 +74,16 @@ public final class Previews {
     /** Its ID. */
     public String id;
 
+    /** Its hostname, `<port>-<sandbox hex>.<domain>`: its own calls (`/v2/previews/{name}`) take it or its ID. */
+    public String name;
+
     /** Always `preview`. */
     public String object;
 
-    /** The sandbox whose port it shares. */
+    /** The machine whose port it shares. */
     public String sandboxId;
 
-    /** The port inside the sandbox. */
+    /** The port inside the machine. */
     public Long port;
 
     /** `private` or `public`. */
@@ -109,6 +112,11 @@ public final class Previews {
 
     public Preview id(String v) {
       this.id = v;
+      return this;
+    }
+
+    public Preview name(String v) {
+      this.name = v;
       return this;
     }
 
@@ -171,6 +179,7 @@ public final class Previews {
       Map<String, Object> m = KitJson.object(raw);
       Preview o = new Preview();
       o.id = KitJson.asString(m.get("id"));
+      o.name = KitJson.asString(m.get("name"));
       o.object = KitJson.asString(m.get("object"));
       o.sandboxId = KitJson.asString(m.get("sandboxId"));
       o.port = KitJson.asLong(m.get("port"));
@@ -188,6 +197,7 @@ public final class Previews {
     Map<String, Object> toMap() {
       Map<String, Object> m = new LinkedHashMap<>();
       if (id != null) m.put("id", id);
+      if (name != null) m.put("name", name);
       if (object != null) m.put("object", object);
       if (sandboxId != null) m.put("sandboxId", sandboxId);
       if (port != null) m.put("port", port);
@@ -205,7 +215,7 @@ public final class Previews {
 
   /** What list takes in its query. */
   public static final class PreviewListQuery {
-    /** The sandbox whose previews to list. */
+    /** The machine whose previews to list. */
     public String sandboxId;
 
     /** Where the page starts: a page's `next`. */
@@ -238,6 +248,32 @@ public final class Previews {
     }
   }
 
+  /** What get takes in its query. */
+  public static final class PreviewGetQuery {
+    /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+    public Double wait;
+
+    /** The state the caller last read, which `wait` waits for it to leave. */
+    public String ifState;
+
+    public PreviewGetQuery wait(Double v) {
+      this.wait = v;
+      return this;
+    }
+
+    public PreviewGetQuery ifState(String v) {
+      this.ifState = v;
+      return this;
+    }
+
+    Map<String, Object> query() {
+      Map<String, Object> q = new LinkedHashMap<>();
+      if (wait != null) q.put("wait", String.valueOf(wait));
+      if (ifState != null) q.put("ifState", String.valueOf(ifState));
+      return q;
+    }
+  }
+
   /** What sign takes in its query. */
   public static final class PreviewSignQuery {
     /** The token's lifetime in seconds, from 60 until the calling key's own end (a year at most); a day when omitted, or the key's end when that is sooner. At least 60. At most 31536000. Default: 86400. */
@@ -255,19 +291,19 @@ public final class Previews {
     }
   }
 
-  /** Shares a port of a sandbox at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview. */
+  /** Shares a port of a machine at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview. */
   public Preview create(String id, PreviewCreate input, Transport.RequestOptions opts) {
     return Preview.of(t.request("POST", "/v2/sandboxes/" + Transport.path(id) + "/previews", null, input == null ? null : input.toMap(), new Transport.Call(false, null), opts));
   }
 
-  /** Lists a sandbox's previews, lowest port first. */
+  /** Lists a machine's previews, lowest port first. */
   public Page<Preview> list(PreviewListQuery query, Transport.RequestOptions opts) {
     return Page.of(t.request("GET", "/v2/previews", query == null ? null : query.query(), null, new Transport.Call(true, null), opts), Preview::of);
   }
 
   /** Returns a preview; `sign` returns one with a token. */
-  public Preview get(String name, Transport.RequestOptions opts) {
-    return Preview.of(t.request("GET", "/v2/previews/" + Transport.path(name), null, null, new Transport.Call(true, null), opts));
+  public Preview get(String name, PreviewGetQuery query, Transport.RequestOptions opts) {
+    return Preview.of(t.request("GET", "/v2/previews/" + Transport.path(name), query == null ? null : query.query(), null, new Transport.Call(true, null), opts));
   }
 
   /** Returns a private preview with a new token; tokens signed before keep their own expiry. */

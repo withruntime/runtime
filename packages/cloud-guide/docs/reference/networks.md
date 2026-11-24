@@ -1,6 +1,6 @@
 # Network API reference
 
-A private network: its sandboxes reach each other by name, over TCP.
+A private network: its machines reach each other by name, over TCP.
 
 Base URL: `https://api.withruntime.com`. [Authentication, idempotency and errors](./overview) work the same way for every product.
 
@@ -53,8 +53,8 @@ result = runtime.networks.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.networks.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.networks.list
 ```
 
 ```bash title="CLI"
@@ -69,7 +69,7 @@ A private network's settings, as it keeps them.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `members` | list of string | No | The machines in it, by ID; none for every sandbox of the org. |
+| `members` | list of string | No | The machines in it, by ID; none for every machine of the org. |
 
 ### Network
 
@@ -77,7 +77,7 @@ A private network: its members reach each other at `<id>.sandbox.internal`, over
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `members` | list of string | No | The machines in it, by ID; none for every sandbox of the org. |
+| `members` | list of string | No | The machines in it, by ID; none for every machine of the org. |
 | `id` | string | Yes | Its ID. |
 | `object` | one of `network` | Yes | Always `network`. |
 | `name` | string | Yes | Its name. |

@@ -12,7 +12,7 @@ import (
 
 // NetworkSettings A private network's settings, as it keeps them.
 type NetworkSettings struct {
-	// Members The machines in it, by ID; none for every sandbox of the org.
+	// Members The machines in it, by ID; none for every machine of the org.
 	Members []string `json:"members,omitempty"`
 }
 
@@ -50,7 +50,7 @@ func (q NetworkListQuery) values() url.Values {
 	return v
 }
 
-// Networks A private network: its sandboxes reach each other by name, over TCP.
+// Networks A private network: its machines reach each other by name, over TCP.
 type Networks struct {
 	t *Transport
 }
@@ -64,9 +64,9 @@ func (c *Networks) List(ctx context.Context, q NetworkListQuery, opts *RequestOp
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Networks) ListAll(ctx context.Context, q NetworkListQuery, opts *RequestOptions) iter.Seq2[Network, error] {
-	return all(func(cursor *string) (*Page[Network], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Network], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

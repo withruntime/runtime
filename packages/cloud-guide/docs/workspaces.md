@@ -8,7 +8,7 @@ A development environment: a machine running VS Code in the browser (code-server
 | --- | --- |
 | vCPUs | 4 |
 | Memory | 8 GB |
-| Disk | 16 GB |
+| Disk | 16 GB, or its image's size when larger |
 | Image | `runtime/workspaces` |
 | Pauses when idle | After 30 minutes |
 
@@ -22,7 +22,7 @@ import { Runtime } from "withruntime";
 const runtime = new Runtime();
 const workspace = await runtime.workspaces.create();
 try {
-  await workspace.exec("git clone --depth 1 https://github.com/withruntime/examples /workspace/examples || mkdir -p /workspace/examples");
+  await workspace.exec("git clone --depth 1 https://github.com/withruntime/go /workspace/go");
   const preview = (await runtime.previews.create(workspace.id, { port: 8080 })).info;
   const editor = `${preview.url}?folder=/workspace&runtime_preview_token=${preview.token}`;
   let page = await fetch(editor);

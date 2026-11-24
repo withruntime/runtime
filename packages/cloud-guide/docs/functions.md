@@ -6,13 +6,13 @@ A machine that answers HTTP with a handler in /app/index.ts (`export default { f
 
 | Default | Value |
 | --- | --- |
-| vCPUs | 1 |
-| Memory | 1 GB |
-| Disk | 4 GB |
+| vCPUs | 2 |
+| Memory | 4 GB |
+| Disk | 4 GB, or its image's size when larger |
 | Image | `runtime/standard` |
 | Pauses when idle | After 60 seconds |
 
-A function is a machine like a [sandbox](./sandboxes): [`POST /v2/functions`](./reference/functions#create-a-function) takes the same [SandboxCreate](./reference/sandboxes#sandboxcreate), and every field overrides a default above. You pay for the CPU it uses while it answers, $0.03 per busy vCPU-hour, and nothing for CPU while it is paused.
+A function is a machine like a [sandbox](./sandboxes): [`POST /v2/functions`](./reference/functions#create-a-function) takes the same [SandboxCreate](./reference/sandboxes#sandboxcreate), and every field overrides a default above. You pay for the CPU it uses while it answers, $0.03 per active vCPU-hour, and nothing for CPU while it is paused.
 
 ## Deploy a handler
 
@@ -31,13 +31,16 @@ try {
 };
 `);
   const preview = (await runtime.previews.create(fn.id, { port: 8080 })).info;
-  let answer = await fetch(`${preview.url}hello`, { headers: { "x-runtime-preview-token": preview.token! } });
-  for (let i = 0; i < 20 && answer.status !== 200; i++) {
-    await new Promise((r) => setTimeout(r, 250)); // the handler may still be loading
-    answer = await fetch(`${preview.url}hello`, { headers: { "x-runtime-preview-token": preview.token! } });
+  const call = () => fetch(`${preview.url}hello`, { headers: { "x-runtime-preview-token": preview.token! } });
+  // Until it answers with this handler: the one it starts with answers first, until it loads this file.
+  let answer = await call(), text = await answer.text();
+  for (let i = 0; i < 40 && text !== '{"path":"/hello"}'; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    answer = await call();
+    text = await answer.text();
   }
-  console.log(answer.status, await answer.text()); // 200 {"path":"/hello"}
-  if (answer.status !== 200) throw new Error(`the function answered ${answer.status}`);
+  console.log(answer.status, text); // 200 {"path":"/hello"}
+  if (text !== '{"path":"/hello"}') throw new Error(`the function answered ${answer.status} ${text}`);
 } finally {
   await fn.delete();
 }

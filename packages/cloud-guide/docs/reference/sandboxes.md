@@ -1,6 +1,6 @@
 # Sandbox API reference
 
-A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused with nothing changing it, a `sandbox.still_paused` event is written for its organization.
+A Linux machine with its own kernel, made in milliseconds, paused with its memory kept when idle and resumed where it was. Its life: running, then idle, then paused, until you delete it. A paused sandbox is kept with its memory and disk until it is deleted: it has no time limit, no retention period and no expiry, and nothing deletes it for its age. Every 30 days a sandbox stays paused, counted from its `pausedAt`, a `sandbox.still_paused` event is written for its organization.
 
 Base URL: `https://api.withruntime.com`. [Authentication, idempotency and errors](./overview) work the same way for every product.
 
@@ -22,6 +22,7 @@ Its states: `starting`, `running`, `paused`, `deleted`, `error`.
 | `GET` | `/v2/sandboxes/{id}/processes/{process}/output` | [processOutput](#processoutput) |
 | `POST` | `/v2/sandboxes/{id}/processes/{process}:write` | [writeProcess](#writeprocess) |
 | `POST` | `/v2/sandboxes/{id}/processes/{process}:signal` | [signalProcess](#signalprocess) |
+| `POST` | `/v2/sandboxes/{id}/processes/{process}:resize` | [resizeProcess](#resizeprocess) |
 | `GET` | `/v2/sandboxes/{id}/processes` | [listProcesses](#listprocesses) |
 | `POST` | `/v2/sandboxes/{id}/files:remove` | [remove](#remove) |
 | `GET` | `/v2/sandboxes/{id}/files/stat` | [stat](#stat) |
@@ -86,8 +87,8 @@ result = runtime.sandboxes.create()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.create
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.create
 ```
 
 ```bash title="CLI"
@@ -143,8 +144,8 @@ result = runtime.sandboxes.get("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.get("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.get("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -197,8 +198,8 @@ result = runtime.sandboxes.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.list
 ```
 
 ```bash title="CLI"
@@ -247,8 +248,8 @@ result = runtime.sandboxes.delete("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.delete("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.delete("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -293,8 +294,8 @@ result = runtime.sandboxes.pause("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.pause("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.pause("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -339,8 +340,8 @@ result = runtime.sandboxes.resume("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.resume("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.resume("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -389,8 +390,8 @@ result = runtime.sandboxes.exec("SANDBOX_ID", cmd="echo hello")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.exec("SANDBOX_ID", cmd: "echo hello")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.exec("SANDBOX_ID", cmd: "echo hello")
 ```
 
 ```bash title="CLI"
@@ -446,8 +447,8 @@ result = runtime.sandboxes.read("SANDBOX_ID", path="/tmp/hello.txt")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.read("SANDBOX_ID", path: "/tmp/hello.txt")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.read("SANDBOX_ID", path: "/tmp/hello.txt")
 ```
 
 ```bash title="CLI"
@@ -505,8 +506,8 @@ result = runtime.sandboxes.write("SANDBOX_ID", b"hello\n", path="/tmp/hello.txt"
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.write("SANDBOX_ID", "hello\n", path: "/tmp/hello.txt")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.write("SANDBOX_ID", "hello\n", path: "/tmp/hello.txt")
 ```
 
 ```bash title="CLI"
@@ -560,8 +561,8 @@ result = runtime.sandboxes.process_output("SANDBOX_ID", "PROCESS_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.process_output("SANDBOX_ID", "PROCESS_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.process_output("SANDBOX_ID", "PROCESS_ID")
 ```
 
 ```bash title="CLI"
@@ -610,8 +611,8 @@ result = runtime.sandboxes.write_process("SANDBOX_ID", "PROCESS_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.write_process("SANDBOX_ID", "PROCESS_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.write_process("SANDBOX_ID", "PROCESS_ID")
 ```
 
 ```bash title="CLI"
@@ -660,12 +661,62 @@ result = runtime.sandboxes.signal_process("SANDBOX_ID", "PROCESS_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.signal_process("SANDBOX_ID", "PROCESS_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.signal_process("SANDBOX_ID", "PROCESS_ID")
 ```
 
 ```bash title="CLI"
 runtime sandboxes signal-process SANDBOX_ID PROCESS_ID
+```
+
+## `resizeProcess`
+
+`POST /v2/sandboxes/{id}/processes/{process}:resize`
+
+Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe.
+
+Its action, for a key's grant: `sandboxes:exec`.
+
+Path: `id`, `process`.
+
+Body: a [Terminal](#terminal).
+
+Returns a [Process](#process).
+
+In v1: `POST /v1/sandboxes/{id}/processes/{process}:resize`.
+
+Examples:
+
+```bash title="curl"
+curl -X POST "https://api.withruntime.com/v2/sandboxes/SANDBOX_ID/processes/PROCESS_ID:resize" \
+  -H "Authorization: Bearer $RUNTIME_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "cols": 1, "rows": 1 }'
+```
+
+```ts title="TypeScript"
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime(); // RUNTIME_API_KEY from the environment
+const result = await runtime.sandboxes.resizeProcess("SANDBOX_ID", "PROCESS_ID", { cols: 1, rows: 1 });
+```
+
+```python title="Python"
+from withruntime import Runtime
+
+runtime = Runtime()  # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.resize_process("SANDBOX_ID", "PROCESS_ID", cols=1, rows=1)
+```
+
+```ruby title="Ruby"
+require "withruntime"
+
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.resize_process("SANDBOX_ID", "PROCESS_ID", cols: 1, rows: 1)
+```
+
+```bash title="CLI"
+runtime sandboxes resize-process SANDBOX_ID PROCESS_ID --cols 1 --rows 1
 ```
 
 ## `listProcesses`
@@ -706,8 +757,8 @@ result = runtime.sandboxes.list_processes("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.list_processes("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.list_processes("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -756,8 +807,8 @@ result = runtime.sandboxes.remove("SANDBOX_ID", path="/tmp/hello.txt")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.remove("SANDBOX_ID", path: "/tmp/hello.txt")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.remove("SANDBOX_ID", path: "/tmp/hello.txt")
 ```
 
 ```bash title="CLI"
@@ -809,8 +860,8 @@ result = runtime.sandboxes.stat("SANDBOX_ID", path="/tmp/hello.txt")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.stat("SANDBOX_ID", path: "/tmp/hello.txt")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.stat("SANDBOX_ID", path: "/tmp/hello.txt")
 ```
 
 ```bash title="CLI"
@@ -865,8 +916,8 @@ result = runtime.sandboxes.list_files("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.list_files("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.list_files("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -921,8 +972,8 @@ result = runtime.sandboxes.download_folder("SANDBOX_ID", path="/tmp/hello.txt")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.download_folder("SANDBOX_ID", path: "/tmp/hello.txt")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.download_folder("SANDBOX_ID", path: "/tmp/hello.txt")
 ```
 
 ```bash title="CLI"
@@ -978,8 +1029,8 @@ result = runtime.sandboxes.upload_folder("SANDBOX_ID", b"hello\n", path="/tmp/he
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.upload_folder("SANDBOX_ID", "hello\n", path: "/tmp/hello.txt")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.upload_folder("SANDBOX_ID", "hello\n", path: "/tmp/hello.txt")
 ```
 
 ```bash title="CLI"
@@ -1028,8 +1079,8 @@ result = runtime.sandboxes.begin_folder_upload("SANDBOX_ID", path="/tmp/hello.tx
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.begin_folder_upload("SANDBOX_ID", path: "/tmp/hello.txt")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.begin_folder_upload("SANDBOX_ID", path: "/tmp/hello.txt")
 ```
 
 ```bash title="CLI"
@@ -1084,8 +1135,8 @@ result = runtime.sandboxes.write_folder_upload("SANDBOX_ID", "UPLOAD_ID", b"hell
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.write_folder_upload("SANDBOX_ID", "UPLOAD_ID", "hello\n")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.write_folder_upload("SANDBOX_ID", "UPLOAD_ID", "hello\n")
 ```
 
 ```bash title="CLI"
@@ -1130,8 +1181,8 @@ result = runtime.sandboxes.commit_folder_upload("SANDBOX_ID", "UPLOAD_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.commit_folder_upload("SANDBOX_ID", "UPLOAD_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.commit_folder_upload("SANDBOX_ID", "UPLOAD_ID")
 ```
 
 ```bash title="CLI"
@@ -1176,8 +1227,8 @@ result = runtime.sandboxes.abort_folder_upload("SANDBOX_ID", "UPLOAD_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.abort_folder_upload("SANDBOX_ID", "UPLOAD_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.abort_folder_upload("SANDBOX_ID", "UPLOAD_ID")
 ```
 
 ```bash title="CLI"
@@ -1226,8 +1277,8 @@ result = runtime.sandboxes.mkdir("SANDBOX_ID", path="/tmp/hello.txt")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.mkdir("SANDBOX_ID", path: "/tmp/hello.txt")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.mkdir("SANDBOX_ID", path: "/tmp/hello.txt")
 ```
 
 ```bash title="CLI"
@@ -1276,8 +1327,8 @@ result = runtime.sandboxes.rename("SANDBOX_ID", from="example", to="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.rename("SANDBOX_ID", from: "example", to: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.rename("SANDBOX_ID", from: "example", to: "example")
 ```
 
 ```bash title="CLI"
@@ -1326,8 +1377,8 @@ result = runtime.sandboxes.link("SANDBOX_ID", path="/tmp/hello.txt")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.link("SANDBOX_ID", path: "/tmp/hello.txt")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.link("SANDBOX_ID", path: "/tmp/hello.txt")
 ```
 
 ```bash title="CLI"
@@ -1372,8 +1423,8 @@ result = runtime.sandboxes.revoke_links("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.revoke_links("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.revoke_links("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -1418,8 +1469,8 @@ result = runtime.sandboxes.get_network("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.get_network("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.get_network("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -1470,8 +1521,8 @@ result = runtime.sandboxes.metrics("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.metrics("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.metrics("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -1524,8 +1575,8 @@ result = runtime.sandboxes.set_network("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.set_network("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.set_network("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -1574,8 +1625,8 @@ result = runtime.sandboxes.fork("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.fork("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.fork("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -1628,8 +1679,8 @@ result = runtime.sandboxes.snapshot("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.snapshot("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.snapshot("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -1640,7 +1691,7 @@ runtime sandboxes snapshot SANDBOX_ID
 
 `POST /v2/sandboxes/{id}:update`
 
-Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412.
+Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused.
 
 Its action, for a key's grant: `sandboxes:update`.
 
@@ -1678,8 +1729,8 @@ result = runtime.sandboxes.update("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.update("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.update("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -1732,8 +1783,8 @@ result = runtime.sandboxes.screenshot("SANDBOX_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.screenshot("SANDBOX_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.screenshot("SANDBOX_ID")
 ```
 
 ```bash title="CLI"
@@ -1782,12 +1833,12 @@ result = runtime.sandboxes.act("SANDBOX_ID", actions=[{"type": "move"}])
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.act("SANDBOX_ID", actions: [{ type: "move" }])
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.act("SANDBOX_ID", actions: [{ type: "move" }])
 ```
 
 ```bash title="CLI"
-runtime sandboxes act SANDBOX_ID --actions { "type": "move" }
+runtime sandboxes act SANDBOX_ID --actions '{ "type": "move" }'
 ```
 
 ## `runCode`
@@ -1832,8 +1883,8 @@ result = runtime.sandboxes.run_code("SANDBOX_ID", code="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sandboxes.run_code("SANDBOX_ID", code: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sandboxes.run_code("SANDBOX_ID", code: "example")
 ```
 
 ```bash title="CLI"
@@ -1866,7 +1917,7 @@ A volume a machine attaches at its create, mounted read-write in it, one machine
 
 ### SandboxRun
 
-A command a sandbox runs once it starts: when it ends, the sandbox stops.
+A command a machine runs once it starts: when it ends, the machine stops.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1877,7 +1928,7 @@ A command a sandbox runs once it starts: when it ends, the sandbox stops.
 
 ### NetworkRules
 
-Where a sandbox may connect out, past the walls every machine has.
+Where a machine may connect out, past the walls every machine has.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1886,13 +1937,13 @@ Where a sandbox may connect out, past the walls every machine has.
 
 ### SandboxSettings
 
-A sandbox's settings: what a create sets on its machine.
+A machine's settings: what a create sets on it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `vcpu` | integer | No | Its vCPUs. At least 1. Default: 2. |
-| `memoryGB` | number | No | Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4. |
-| `diskGB` | number | No | Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4. |
+| `vcpu` | integer | No | Its vCPUs; its product's default when omitted. At least 1. |
+| `memoryGB` | number | No | Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1. |
+| `diskGB` | number | No | Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1. |
 | `image` | string | No | The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. |
 | `secrets` | list of string | No | The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. At most 64 items. |
 | `start` | [MachineStart](#machinestart) | No | The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted. |
@@ -1900,27 +1951,31 @@ A sandbox's settings: what a create sets on its machine.
 
 ### SandboxCreate
 
-A sandbox to create.
+A machine to create.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `vcpu` | integer | No | Its vCPUs. At least 1. Default: 2. |
-| `memoryGB` | number | No | Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4. |
-| `diskGB` | number | No | Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4. |
+| `vcpu` | integer | No | Its vCPUs; its product's default when omitted. At least 1. |
+| `memoryGB` | number | No | Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1. |
+| `diskGB` | number | No | Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1. |
 | `image` | string | No | The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. |
 | `secrets` | list of string | No | The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. At most 64 items. |
 | `start` | [MachineStart](#machinestart) | No | The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted. |
 | `user` | one of `runtime`, `root` | No | Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`. |
 | `volumes` | list of [VolumeMount](#volumemount) | No | Volumes it attaches and mounts at its create, at most one; detached when it is deleted, to attach to another. |
-| `run` | [SandboxRun](#sandboxrun) | No | A command it runs once it starts. When the command ends, the sandbox is `paused` with its disk kept (exitCode says how it ended) and a call starts it again. Needs the `exec` permission too. |
+| `run` | [SandboxRun](#sandboxrun) | No | A command it runs once it starts. When the command ends, the machine is `paused` with its disk kept (exitCode says how it ended) and a call starts it again. Needs the `exec` permission too. |
 | `name` | string | No | Its name, unique in its project. |
 | `labels` | labels (keys under `runtime.` are Runtime's) | No | Labels to find it by. |
-| `getOrCreate` | boolean | No | With a name: the sandbox of that name when there is one, else a new one. |
+| `getOrCreate` | boolean | No | With a name: the machine of that name when there is one, else a new one. |
 | `maxCost` | string (US dollars, decimal) | No | The most it may cost in all, in US dollars (`"5.00"`): once it has cost that it pauses, and starts again only once its maxCost is raised (`update`); what a key's per-request and spend caps count. When omitted under a key with a per-request or spend cap, the most that key's caps leave. |
-| `idlePauseSeconds` | integer | No | Seconds with nothing happening before it pauses, 60 to 86400; 0 never; 300 when omitted. A fork keeps its source's, except 0: a copy never pauses only when its fork asks. At least 0. At most 86400. |
-| `snapshot` | string | No | A snapshot it starts as: a copy of it running, at its sizes, in its project, with its secrets. |
+| `idlePauseSeconds` | integer | No | Seconds with nothing happening before it pauses, 60 to 86400; 0 never; its product's default when omitted (300 for a sandbox). A fork keeps its source's, except 0: a copy never pauses only when its fork asks. At least 0. At most 86400. |
+| `from` | string | No | What it starts as, by ID or name: a snapshot (a copy of it running, at its sizes, in its project, with its secrets) or an image (as `image` takes it). A name is a snapshot's when the project has one of that name, else an image's. Not with `image`. Running copies of a sandbox are `fork`'s. |
+| `snapshot` | string | No | Deprecated: SDK 1.0.x's name for `from` with a snapshot, read as `from` ([`snapshot_is_from`]). Not with `from`. |
 | `network` | [NetworkRules](#networkrules) | No | Where it may connect out from its first start, as setNetwork takes it; the open internet behind every machine's walls when omitted. |
 | `env` | object of strings | No | Environment variables for every command and process in it and its start, at most 32 and 32768 bytes of names and values; values are never answered. A copy keeps them. |
+| `autoWake` | boolean | No | Whether a call that reaches it paused (an exec, a file, a terminal, a preview's visitor) resumes it; true when omitted. false: such a call answers 409 sandbox_paused and it stays paused until its own `:resume`. A fork's copies keep it. |
+| `deleteAfterSeconds` | integer | No | Seconds until Runtime deletes it, as its delete does: final at once, its memory and disk gone and no longer billed; it can't be undone. 0 or omitted: kept until deleted. Its owner renews it with update; a copy, snapshot or image made from it sets its own. At least 0. At most 315360000. |
+| `deleteProtection` | boolean | No | Whether its delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`. While true, its time limit pauses it instead of deleting it; only its organization's close deletes it. A copy, snapshot or image made from it sets its own. |
 
 ### MachineReady
 
@@ -1933,19 +1988,19 @@ How a create's wait for its start's ready check (`start.readyPort`, `start.ready
 
 ### Sandbox
 
-A sandbox.
+A machine.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `vcpu` | integer | No | Its vCPUs. At least 1. Default: 2. |
-| `memoryGB` | number | No | Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). At least 1. Default: 4. |
-| `diskGB` | number | No | Its disk in GB (1 GB is 1,024 MiB), to the MiB. At least 1. Default: 4. |
+| `vcpu` | integer | No | Its vCPUs; its product's default when omitted. At least 1. |
+| `memoryGB` | number | No | Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. At least 1. |
+| `diskGB` | number | No | Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. At least 1. |
 | `image` | string | No | The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. |
 | `secrets` | list of string | No | The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. At most 64 items. |
 | `start` | [MachineStart](#machinestart) | No | The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted. |
 | `user` | one of `runtime`, `root` | No | Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`. |
 | `id` | string | Yes | Its ID. |
-| `object` | one of `sandbox`, `function`, `app`, `site`, `ci`, `browser`, `desktop`, `notebook`, `workspace`, `container`, `build` | Yes | Always `sandbox`. |
+| `object` | one of `sandbox`, `function`, `app`, `site`, `ci`, `browser`, `desktop`, `notebook`, `workspace`, `container`, `build`, `agent.session` | Yes | Its product's kind: `sandbox` for a sandbox, `app` for an app, and so on. |
 | `name` | string | No | Its name, unique in its project. |
 | `state` | one of `starting`, `running`, `paused`, `deleted`, `error` | Yes | Where it is. |
 | `labels` | labels (keys under `runtime.` are Runtime's) | Yes | Its labels. |
@@ -1954,9 +2009,13 @@ A sandbox.
 | `revision` | integer | No | Its revision, changed by every change to it: what an update's If-Match names. |
 | `idlePauseSeconds` | integer | No | Seconds with nothing happening before it pauses; 0 never. Default: 300. |
 | `maxCost` | string (US dollars, decimal) | No | The most it may cost in all, in US dollars; none when it has no such cap. |
+| `autoWake` | boolean | No | Whether a call that reaches it paused resumes it; false: only its own resume does, and such a call answers 409 sandbox_paused. Default: true. |
 | `exitCode` | integer | No | Its run's exit code, once its run ended; none for one a signal or its timeout ended. |
 | `endedAt` | string (RFC 3339) | No | When its run ended. |
+| `pausedAt` | string (RFC 3339) | No | When its pause began (or its run ended), while it is paused. |
 | `ready` | [MachineReady](#machineready) | No | A create's answer alone, for a start with a ready check: how its wait went. |
+| `deleteAt` | string (RFC 3339) | No | When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted. |
+| `deleteProtection` | boolean | No | Whether its delete is refused (409 `delete_protected`) until an update turns this off. |
 
 ### Terminal
 
@@ -1983,7 +2042,7 @@ A command to run: to its end, or started and answered at once (`wait: false`).
 | `stdinOpen` | boolean | No | Keep its standard input open for processes.write; not with stdin, and not with a wait for its end. |
 | `outputEncoding` | one of `utf8`, `base64` | No | How processes.output answers its output. Default: "utf8". |
 | `pty` | [Terminal](#terminal) | No | Run it on a terminal of this size: its input, output and controlling terminal; not with a wait for its end. |
-| `user` | one of `runtime`, `root` | No | Who it runs as: `runtime` (uid 1000, with passwordless sudo) or `root`; the sandbox's `user` when omitted. |
+| `user` | one of `runtime`, `root` | No | Who it runs as: `runtime` (uid 1000, with passwordless sudo) or `root`; the machine's `user` when omitted. |
 
 ### Process
 
@@ -2011,6 +2070,39 @@ A process.
 | `stdoutTruncated` | boolean | No | stdout holds only part of what it wrote (its first 1 MiB). |
 | `stderrTruncated` | boolean | No | stderr holds only part of what it wrote (its first 1 MiB). |
 | `durationSeconds` | number | No | How long it ran, in seconds, to the millisecond, once it ended. |
+
+### ExecEventError
+
+A failed read of an exec's events: the error the API would have answered, and where to follow on from.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `code` | string | Yes | The error's code. |
+| `message` | string | No | What went wrong. |
+| `status` | integer | No | The status the API answered. |
+| `processId` | string | No | The process. |
+| `cursor` | integer | No | The cursor to follow its output on from (processes.output). |
+
+### ExecEvent
+
+One event of an exec asked for its events (`stream: true`, or `Accept: application/x-ndjson`), one JSON object a line: `start`, then `stdout` and `stderr` as the output comes, `truncated` when output was dropped before it was read, and `exit`; or `continue` (follow on with processes.output from `cursor`) or `error`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | one of `start`, `stdout`, `stderr`, `truncated`, `exit`, `continue`, `error` | Yes | `start`, `stdout`, `stderr`, `truncated`, `exit`, `continue` or `error`. |
+| `processId` | string | No | The process: `start` and `continue`. |
+| `replayed` | boolean | No | `start`: this Idempotency-Key ran it before, and these are that run's events again. |
+| `data` | string | No | `stdout` and `stderr`: the output, as text. |
+| `base64` | string | No | `stdout` and `stderr`: the output's bytes, in base64, with outputEncoding `base64`. |
+| `offset` | integer | No | `stdout` and `stderr`: where in the process's output these bytes start. |
+| `droppedBytes` | integer | No | `truncated`: how many bytes were dropped. |
+| `resumeAt` | integer | No | `truncated`: where the output read on from. |
+| `exitCode` | integer | No | `exit`: its exit code. |
+| `state` | one of `running`, `exited`, `killed`, `timed_out` | No | `exit`: how it ended. |
+| `timedOut` | boolean | No | `exit`: it was stopped at its timeout. |
+| `durationSeconds` | number | No | `exit`: how long it ran. |
+| `cursor` | integer | No | `continue`: the cursor to follow its output on from (processes.output). |
+| `error` | [ExecEventError](#execeventerror) | No | `error`: what failed. |
 
 ### FileWritten
 
@@ -2101,7 +2193,7 @@ A file, a link or a directory removed.
 
 ### FileInfo
 
-A path in a sandbox: what is there, if anything.
+A path in a machine: what is there, if anything.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2215,16 +2307,16 @@ A file, a link or a directory moved.
 
 ### FileLinkCreate
 
-A file link to make: an expiring address for one file of a sandbox (or, with `archive`, a folder) that anyone may open with no API key.
+A file link to make: an expiring address for one file of a machine (or, with `archive`, a folder) that anyone may open with no API key.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `path` | string | Yes | The file's absolute path in the sandbox. For GET it must exist when the link is made. |
+| `path` | string | Yes | The file's absolute path in the machine. For GET it must exist when the link is made. |
 | `method` | one of `GET`, `PUT` | No | `GET` (default): a download link. `PUT`: an upload link; the request's body becomes the file. |
 | `expiresInSeconds` | integer | No | How long the link works, in seconds. At least 60. At most 604800. Default: 3600. |
 | `filename` | string | No | Download as this name (`Content-Disposition: attachment`). Without it a picture, video, sound or plain text shows in the browser; anything else downloads. |
 | `maxBytes` | integer | No | PUT only: the largest body the link takes, in bytes; 5 GiB by default and at most. At least 0. At most 5368709120. |
-| `wake` | boolean | No | false: a paused sandbox is not woken for the link, which answers 409 `sandbox_paused`. Unset or true: it is woken. |
+| `wake` | boolean | No | false: a paused machine is not woken for the link, which answers 409 `sandbox_paused`. Unset or true: it is woken. |
 | `archive` | boolean | No | GET only: `path` is a folder, downloaded as a `.tar.gz`. Default: false. |
 
 ### FileLink
@@ -2235,8 +2327,8 @@ A file link.
 | --- | --- | --- | --- |
 | `url` | string | Yes | Its address, opened with no key: GET to download, PUT the file's bytes to upload. |
 | `method` | one of `GET`, `PUT` | Yes | `GET` or `PUT`. |
-| `path` | string | Yes | The file's path in the sandbox. |
-| `sandboxId` | string | Yes | The sandbox. |
+| `path` | string | Yes | The file's path in the machine. |
+| `sandboxId` | string | Yes | The machine. |
 | `expiresAt` | string (RFC 3339) | Yes | When it stops working. |
 | `filename` | string | No | The name it downloads as. |
 | `maxBytes` | integer | No | The largest body an upload link takes. |
@@ -2244,22 +2336,22 @@ A file link.
 
 ### FileLinksRevoked
 
-A sandbox's file links ended.
+A machine's file links ended.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `sandboxId` | string | Yes | The sandbox. |
+| `sandboxId` | string | Yes | The machine. |
 | `revokedAt` | string (RFC 3339) | Yes | When they ended: every link made before it. |
 
 ### SandboxNetwork
 
-Where a sandbox may connect out.
+Where a machine may connect out.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `allowOutbound` | list of string | No | The only places it may reach, each a host, `*.` and a name for every name under it, an address or a CIDR (`[` and `]` around an IPv6 address), every port when it names none; `:port` for that port alone, on a host name for a port beyond 80 and 443, which go together. `*` is every public host. Every public host when omitted; nothing when empty. |
 | `denyOutbound` | list of string | No | Places it may never reach, written as in allowOutbound with no port: a deny wins over every allow. |
-| `id` | string | Yes | The sandbox's ID. |
+| `id` | string | Yes | The machine's ID. |
 
 ### MetricPoint
 
@@ -2283,7 +2375,7 @@ A machine's CPU and memory as its host measures them from the machine's own cgro
 
 ### MetricsBase
 
-A sandbox's CPU and memory over a time window, in steps, and its current reading (with disk and pressure) while it runs. Steps are returned in every state, including paused and stopped. Ranges: `15m` and `1h` in 60-second steps, `6h` in 120-second steps, `24h` in 480-second steps, `7d` and `30d` in 1-hour steps. Defaults to `1h`.
+A machine's CPU and memory over a time window, in steps, and its current reading (with disk and pressure) while it runs. Steps are returned in every state, including paused and stopped. Ranges: `15m` and `1h` in 60-second steps, `6h` in 120-second steps, `24h` in 480-second steps, `7d` and `30d` in 1-hour steps. Defaults to `1h`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2296,11 +2388,11 @@ A sandbox's CPU and memory over a time window, in steps, and its current reading
 | `memoryLimitBytes` | integer | Yes | Its memory, in bytes. |
 | `diskLimitBytes` | integer | Yes | Its disk, in bytes. |
 | `latest` | [MetricPoint](#metricpoint) | No | The reading taken now; none when it is not running or its host could not read it. |
-| `points` | list of [MetricPoint](#metricpoint) | Yes | The window's steps, oldest first, each averaged over the time the sandbox ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading. |
+| `points` | list of [MetricPoint](#metricpoint) | Yes | The window's steps, oldest first, each averaged over the time the machine ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading. |
 
 ### SandboxMetrics
 
-A sandbox's metrics.
+A machine's metrics.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2313,12 +2405,12 @@ A sandbox's metrics.
 | `memoryLimitBytes` | integer | Yes | Its memory, in bytes. |
 | `diskLimitBytes` | integer | Yes | Its disk, in bytes. |
 | `latest` | [MetricPoint](#metricpoint) | No | The reading taken now; none when it is not running or its host could not read it. |
-| `points` | list of [MetricPoint](#metricpoint) | Yes | The window's steps, oldest first, each averaged over the time the sandbox ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading. |
-| `id` | string | Yes | The sandbox's ID. |
+| `points` | list of [MetricPoint](#metricpoint) | Yes | The window's steps, oldest first, each averaged over the time the machine ran in it. Steps in which it did not run are omitted. A minute appears about a minute after it ends; `latest` holds the current reading. |
+| `id` | string | Yes | The machine's ID. |
 
 ### ForkRequest
 
-Copies of a sandbox to make, as it is now.
+Copies of a machine to make, as it is now.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -2328,6 +2420,9 @@ Copies of a sandbox to make, as it is now.
 | `secrets` | list of string | No | The secrets each copy gets, by name: only these, never one its source may not use; its source's when omitted. At most 64 items. |
 | `maxCost` | string (US dollars, decimal) | No | The most each may cost in all, in US dollars (`"5.00"`): once one has cost that it pauses, as a create's maxCost. When omitted, the least of its key's caps and its source's maxCost. |
 | `idlePauseSeconds` | integer | No | Seconds with nothing happening before each copy pauses, 60 to 86400; 0 never. When omitted, its source's, unless its source never pauses (0): then its product's default, 300 for a sandbox. At least 0. At most 86400. |
+| `vcpu` | integer | No | The vCPUs each copy may use, at most its source's; its source's when omitted. A copy keeps its source's vCPUs online and is held to this many vCPUs of CPU time, which it is placed and billed by. Its memory is its source's. At least 1. |
+| `deleteAfterSeconds` | integer | No | Seconds until Runtime deletes each copy, as its delete does: final, and it can't be undone. 0 or omitted: kept until deleted; a copy never takes its source's. At least 0. At most 315360000. |
+| `deleteProtection` | boolean | No | Whether each copy's delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`; a copy never takes its source's. |
 
 ### Forked
 
@@ -2339,14 +2434,16 @@ The copies a fork made, each running.
 
 ### SnapshotRequest
 
-A snapshot of a sandbox to take.
+A snapshot of a machine to take.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `name` | string | No | Its name, unique among the project's snapshots. |
 | `labels` | labels (keys under `runtime.` are Runtime's) | No | Labels to find it by. |
 | `image` | string | No | Keeps its disk alone, synced, as the next version of the image of this name (`name:1`, `name:2`, ...) in place of a snapshot: an image machines are created from, each booting fresh over a disk of its own. Its memory is not kept; name is ignored. |
-| `start` | [MachineStart](#machinestart) | No | With image: the command each machine created from the image starts at every fresh boot; the sandbox's own when omitted. |
+| `start` | [MachineStart](#machinestart) | No | With image: the command each machine created from the image starts at every fresh boot; the machine's own when omitted. |
+| `deleteAfterSeconds` | integer | No | Seconds until Runtime deletes the snapshot (or, with image, that image version), as its delete does: final, and it can't be undone. 0 or omitted: kept until deleted. At least 0. At most 315360000. |
+| `deleteProtection` | boolean | No | Whether the snapshot's (or, with image, that image version's) delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`. |
 
 ### Stored
 
@@ -2361,13 +2458,16 @@ Stored data: a snapshot, an image or a volume.
 | `labels` | labels (keys under `runtime.` are Runtime's) | Yes | Its labels. |
 | `sizeBytes` | integer | Yes | What it was made to hold, in bytes. |
 | `storedBytes` | integer | Yes | What it holds now, in bytes. |
-| `parentId` | string | No | What it was made from (a snapshot's sandbox, an image's base), if anything. |
+| `parentId` | string | No | What it was made from (a snapshot's machine, an image's base), if anything. |
 | `attachedTo` | string | No | The machine it is attached to now, if any. |
 | `createdAt` | string (RFC 3339) | No | When it was made. |
 | `version` | integer | No | An image's version of its name: each build or keep of a name is its next. |
 | `tags` | list of string | No | An image's tags, each `name:tag`. |
 | `error` | string | No | Why an image's build failed. |
 | `deletedAt` | string (RFC 3339) | No | When it was deleted: a delete's answer, its state `deleted`. |
+| `deleteAt` | string (RFC 3339) | No | When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted. |
+| `deleteWaitsFor` | string | No | Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does. |
+| `deleteProtection` | boolean | No | Whether its delete is refused (409 `delete_protected`) until an update turns this off. |
 
 ### MachineUpdate
 
@@ -2377,14 +2477,17 @@ A change to a machine's settings: each field left out stays as it is.
 | --- | --- | --- | --- |
 | `name` | string | No | Its name, unique in its project. |
 | `labels` | labels (keys under `runtime.` are Runtime's) | No | Its labels, in place of its own; those under `runtime.` are kept. |
-| `idlePauseSeconds` | integer | No | Seconds with nothing happening before it pauses, 60 to 86400; 0 never. |
-| `vcpu` | integer | No | Its vCPUs, grown while it runs; a running sandbox's vCPUs only grow. At least 1. |
-| `memoryGB` | number | No | Its memory in GB (1 GB is 1,024 MiB), grown while it runs; a running sandbox's memory only grows. At least 1. |
+| `idlePauseSeconds` | integer | No | Seconds with nothing happening before it pauses, 60 to 86400; 0 never. Nothing happening means no call or command running, no traffic, almost no CPU, and no outbound connection it opened still open. |
+| `vcpu` | integer | No | Its vCPUs, grown while it runs; a running machine's vCPUs only grow. At least 1. |
+| `memoryGB` | number | No | Its memory in GB (1 GB is 1,024 MiB), grown while it runs; a running machine's memory only grows. At least 1. |
 | `diskGB` | number | No | Its disk in GB (1 GB is 1,024 MiB), grown while it runs, its file system with it; a disk only grows. At least 1. |
 | `user` | one of `runtime`, `root` | No | Who its commands run as from now when a call names no `user`: `runtime` or `root`. Running ones keep theirs. |
 | `env` | object of strings | No | Environment variables to set, each over its own value, the others kept: the update answers once a running one holds the change (a paused one is given it at its wake), so each process, command and terminal it starts after the answer has them; processes already running keep the environment they started with. At most 32 variables and 32768 bytes of names and values in all, as a create's; values are never answered. |
 | `removeEnv` | list of string | No | Names of environment variables to take out, the same way: gone from the next process it starts; processes already running keep them. |
 | `maxCost` | string (US dollars, decimal) | No | The most it may cost in all, in US dollars (`"5.00"`), in place of its own: one paused at its old maxCost wakes at its next call under a higher one. |
+| `autoWake` | boolean | No | Whether a call that reaches it paused (an exec, a file, a terminal, a preview's visitor) resumes it from now. false: such a call answers 409 sandbox_paused and it stays paused until its own `:resume`. |
+| `deleteAfterSeconds` | integer | No | Seconds from now until Runtime deletes it, as its delete does: final, and it can't be undone. Sent again before then, it renews it; 0 takes its end off (kept until deleted). At least 0. At most 315360000. |
+| `deleteProtection` | boolean | No | true refuses its delete (409 `delete_protected`) until an update sends false; while true, its time limit pauses it instead of deleting it. Not while it has a `deleteAt`, unless the same update sends `deleteAfterSeconds` 0. |
 
 ### Action
 

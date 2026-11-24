@@ -23,6 +23,14 @@ export interface Role {
   deletedAt?: string;
 }
 
+/** A change to a role's actions: the actions to add and the actions to remove, in one step. Each is `product:action`, `product:*` or `*`. */
+export interface RoleActionsChange {
+  /** The actions to add. One the role already holds as written is left as it is. At most 100 items. */
+  add?: string[];
+  /** The actions to remove, each as the role holds it. One the role does not hold is ignored. At most 100 items. */
+  remove?: string[];
+}
+
 /** What list takes in its query. */
 export type RoleListQuery = {
   /** The most items the page holds. At least 1. At most 200. Default: 50. */
@@ -31,23 +39,28 @@ export type RoleListQuery = {
 
 /** One of the organization's own roles: the actions a grant of it allows. The built-in roles (owner, admin, developer, viewer, billing) are not listed here. */
 export class Roles {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the organization's own roles, by name. */
-  list(query: RoleListQuery = {}, options?: RequestOptions): Paginated<Role> {
-    return new Paginated<Role>((cursor) => this.#t.request<Page<Role>>("GET", `/v2/roles`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: RoleListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Role> {
+    return new Paginated<Role>((cursor) => this.transport.request<Page<Role>>("GET", `/v2/roles`, { query: { ...query, cursor }, options, idempotent: true }));
+  }
+
+  /** Adds actions to a role and removes actions from it, in place, and returns the role. Every key and grant that gives the role has the new actions from its next call; no key's secret changes. Only an owner or an admin may change a role's actions, and only to add actions the caller may perform itself across the whole organization: any other caller or action returns 403. An action no call has returns 400. A role Runtime manages (its name starts with `runtime.`) returns 409, as does a removal from a role that a deny grant gives (a deny is lifted only by deleting that grant; an addition is allowed), a removal that would leave the role with no actions, or one that removes an action the role still holds through a wildcard such as `images:*`. Adding an action the role already holds, or removing one it does not hold, changes nothing, so the call is safe to retry. Each change is one audit log entry, `roles:actions`, whose reason lists the actions added and removed. */
+  actions(id: string, input: RoleActionsChange = {}, options?: RequestOptions): Promise<Role> {
+    return this.transport.request<Role>("POST", `/v2/roles/${encodeURIComponent(id)}:actions`, { body: input, options, idempotent: true });
   }
 
   /** Renames a role; its actions and its grants stay as they are. A built-in role's name, or another role's, returns 409. */
   update(id: string, input: Rename, options?: RequestOptions): Promise<Role> {
-    return this.#t.request<Role>("POST", `/v2/roles/${encodeURIComponent(id)}:update`, { body: input, options, idempotent: true });
+    return this.transport.request<Role>("POST", `/v2/roles/${encodeURIComponent(id)}:update`, { body: input, options, idempotent: true });
   }
 
   /** Deletes a role and frees its name, with the grants and invitations that give it. The caller needs `grants:delete` as well, as the grants go with it. A role that a deny grant gives returns 409: a deny is lifted only by deleting that grant. Deleted again, it returns 404. */
   delete(id: string, options?: RequestOptions): Promise<Role> {
-    return this.#t.request<Role>("DELETE", `/v2/roles/${encodeURIComponent(id)}`, { options, idempotent: true });
+    return this.transport.request<Role>("DELETE", `/v2/roles/${encodeURIComponent(id)}`, { options, idempotent: true });
   }
 }

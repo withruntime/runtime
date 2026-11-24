@@ -5,104 +5,163 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # A project: where sandboxes, storage, addresses and keys sit.
-    # - +id+: Its ID.
-    # - +object+: Always `project`.
-    # - +name+: Its name, unique in the organization.
-    # - +default+: Whether it is the organization's default project, where a call that names none acts.
-    # - +created_at+: When it was made.
-    # - +state+: `active`; `deleted` once deleted: a delete's answer.
-    # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
-    Project = Struct.new(:id, :object, :name, :default, :created_at, :state, :deleted_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A project's own limits: each of its organization's plan limits set lower for it alone, never higher, by the price card's names and in its units. A start in it is held to both. One not set is its organization's.
+  # - +running_vcpu+: The most vCPUs its machines run at once. At least 0.
+  # - +running_memory_gib+: The most memory its machines hold at once, in GiB. At least 0.
+  # - +machine_vcpu+: The most vCPUs one of its machines has. At least 0.
+  # - +machine_memory_gib+: The most memory one of its machines has, in GiB. At least 0.
+  # - +new_machines_per_second+: The most machines it starts a second. At least 0.
+  ProjectLimits = Struct.new(:running_vcpu, :running_memory_gib, :machine_vcpu, :machine_memory_gib, :new_machines_per_second, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          name: h["name"],
-          default: h["default"],
-          created_at: h["createdAt"],
-          state: h["state"],
-          deleted_at: h["deletedAt"],
-        )
-      end
-
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "name" => self.name,
-          "default" => self.default,
-          "createdAt" => self.created_at,
-          "state" => self.state,
-          "deletedAt" => self.deleted_at,
-        }.compact
-      end
+      new(
+        running_vcpu: h["runningVcpu"],
+        running_memory_gib: h["runningMemoryGib"],
+        machine_vcpu: h["machineVcpu"],
+        machine_memory_gib: h["machineMemoryGib"],
+        new_machines_per_second: h["newMachinesPerSecond"],
+      )
     end
 
-    # A new project.
-    # - +name+: Its name, unique in the organization. At least 1 character. At most 64 characters.
-    ProjectCreate = Struct.new(:name, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "runningVcpu" => self.running_vcpu,
+        "runningMemoryGib" => self.running_memory_gib,
+        "machineVcpu" => self.machine_vcpu,
+        "machineMemoryGib" => self.machine_memory_gib,
+        "newMachinesPerSecond" => self.new_machines_per_second,
+      }.compact
+    end
+  end
 
-        new(
-          name: h["name"],
-        )
-      end
+  # A project: where machines, storage, addresses and keys sit.
+  # - +id+: Its ID.
+  # - +object+: Always `project`.
+  # - +name+: Its name, unique in the organization.
+  # - +default+: Whether it is the organization's default project, where a call that names none acts.
+  # - +created_at+: When it was made.
+  # - +state+: `active`; `deleted` once deleted: a delete's answer.
+  # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
+  # - +limits+: Its own limits: those of its organization's plan limits set lower for it. One not set is its organization's.
+  Project = Struct.new(:id, :object, :name, :default, :created_at, :state, :deleted_at, :limits, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "name" => self.name,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        object: h["object"],
+        name: h["name"],
+        default: h["default"],
+        created_at: h["createdAt"],
+        state: h["state"],
+        deleted_at: h["deletedAt"],
+        limits: ProjectLimits.from(h["limits"]),
+      )
     end
 
-    # A new name; everything else stays as it is.
-    # - +name+: Its name. At least 1 character. At most 64 characters.
-    Rename = Struct.new(:name, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "id" => self.id,
+        "object" => self.object,
+        "name" => self.name,
+        "default" => self.default,
+        "createdAt" => self.created_at,
+        "state" => self.state,
+        "deletedAt" => self.deleted_at,
+        "limits" => self.limits&.to_wire,
+      }.compact
+    end
+  end
 
-        new(
-          name: h["name"],
-        )
-      end
+  # A new project.
+  # - +name+: Its name, unique in the organization. At least 1 character. At most 64 characters.
+  # - +limits+: Its own limits ([`ProjectLimits`]); none, its organization's.
+  ProjectCreate = Struct.new(:name, :limits, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "name" => self.name,
-        }.compact
-      end
+      new(
+        name: h["name"],
+        limits: ProjectLimits.from(h["limits"]),
+      )
     end
 
-    # A project: where sandboxes, storage, addresses and keys sit, each in one. Every organization has a default project, where a call that names none acts.
-    class Projects
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "name" => self.name,
+        "limits" => self.limits&.to_wire,
+      }.compact
+    end
+  end
 
-      # Lists the organization's projects, the default first, then by name.
-      def list(cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/projects", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Project.from(i) }
-      end
+  # A project's own limits, set.
+  # - +limits+: Its limits, the whole set: each one given is set, each one left out is its organization's again.
+  ProjectLimitsSet = Struct.new(:limits, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      # Creates a project. A name another project has returns 409. Asked again with the same Idempotency-Key, it returns the same one.
-      def create(name:, idempotency_key: nil)
-        Project.from(@transport.request("POST", "/v2/projects", body: { "name" => name }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+      new(
+        limits: ProjectLimits.from(h["limits"]),
+      )
+    end
 
-      # Renames a project; what is in it stays as it is. A name another project has returns 409.
-      def update(id, name:, idempotency_key: nil)
-        Project.from(@transport.request("POST", "/v2/projects/#{URI.encode_www_form_component(id)}:update", body: { "name" => name }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    def to_wire
+      {
+        "limits" => self.limits&.to_wire,
+      }.compact
+    end
+  end
 
-      # Deletes a project and frees its name, with the grants, keys and invitations held to it. The caller needs `grants:delete` as well, as the grants go with it. The default project, or one that still holds a sandbox, storage or an address, returns 409. Deleted again, it returns 404.
-      def delete(id, idempotency_key: nil)
-        Project.from(@transport.request("DELETE", "/v2/projects/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
-      end
+  # A new name; everything else stays as it is.
+  # - +name+: Its name. At least 1 character. At most 64 characters.
+  Rename = Struct.new(:name, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
+
+      new(
+        name: h["name"],
+      )
+    end
+
+    def to_wire
+      {
+        "name" => self.name,
+      }.compact
+    end
+  end
+
+  # A project: where machines, storage, addresses and keys sit, each in one. Every organization has a default project, where a call that names none acts.
+  class Projects
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Lists the organization's projects, the default first, then by name.
+    def list(cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/projects", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Project.from(i) }
+    end
+
+    # Creates a project, with its own limits when given. A name another project has returns 409; a limit above its organization's returns 400 `limit_above_org`. Asked again with the same Idempotency-Key, it returns the same one.
+    def create(name:, limits: nil, idempotency_key: nil)
+      Project.from(@transport.request("POST", "/v2/projects", body: { "name" => name, "limits" => limits }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Sets a project's own limits: each of its organization's plan limits set lower for it alone, by the price card's names. The whole set: a limit left out is its organization's again. One above its organization's returns 400 `limit_above_org`, naming the limit and both figures. Each start in the project is held to its limits and its organization's.
+    def limits(id, limits:, idempotency_key: nil)
+      Project.from(@transport.request("POST", "/v2/projects/#{URI.encode_www_form_component(id)}:limits", body: { "limits" => limits }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Renames a project; what is in it stays as it is. A name another project has returns 409.
+    def update(id, name:, idempotency_key: nil)
+      Project.from(@transport.request("POST", "/v2/projects/#{URI.encode_www_form_component(id)}:update", body: { "name" => name }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Deletes a project and frees its name, with the grants, keys and invitations held to it. The caller needs `grants:delete` as well, as the grants go with it. The default project, or one that still holds a machine, storage or an address, returns 409. Deleted again, it returns 404.
+    def delete(id, idempotency_key: nil)
+      Project.from(@transport.request("DELETE", "/v2/projects/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

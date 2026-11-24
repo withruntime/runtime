@@ -1,6 +1,6 @@
 # Switch from E2B
 
-Runtime's sandboxes do what E2B's do, with pause and resume that keep memory, forks of a running sandbox, and CPU billed on use ($0.03 per busy vCPU-hour). Most code moves by renaming calls.
+Runtime's sandboxes do what E2B's do, with pause and resume that keep memory, forks of a running sandbox, and CPU billed on use ($0.03 per active vCPU-hour). Most code moves by renaming calls.
 
 | E2B | Runtime |
 | --- | --- |

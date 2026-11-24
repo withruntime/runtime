@@ -1,6 +1,6 @@
 # Tunnel API reference
 
-A WireGuard tunnel from your own network into your sandboxes.
+A WireGuard tunnel from your own network into your machines.
 
 Base URL: `https://api.withruntime.com`. [Authentication, idempotency and errors](./overview) work the same way for every product.
 
@@ -53,8 +53,8 @@ result = runtime.tunnels.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.tunnels.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.tunnels.list
 ```
 
 ```bash title="CLI"
@@ -73,17 +73,17 @@ One of the org's own machines or routers on a tunnel.
 | `name` | string | Yes | Its name, unique in the tunnel. |
 | `publicKey` | string | Yes | Its WireGuard public key. |
 | `address` | string | Yes | Its address in the tunnel's subnet. |
-| `routes` | list of string | Yes | The org's own ranges behind it that sandboxes may reach. |
+| `routes` | list of string | Yes | The org's own ranges behind it that machines may reach. |
 | `createdAt` | string (RFC 3339) | Yes | When it was added. |
 | `rotatedAt` | string (RFC 3339) | No | When its key was last replaced. |
 
 ### TunnelMember
 
-A sandbox's address in a tunnel's subnet.
+A machine's address in a tunnel's subnet.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `sandboxId` | string | Yes | The sandbox. |
+| `sandboxId` | string | Yes | The machine. |
 | `address` | string | Yes | Its address in the subnet. |
 
 ### TunnelSettings
@@ -98,11 +98,11 @@ A WireGuard tunnel's settings, as it keeps them; its gateway's private key is ke
 | `gatewayPublicKey` | string | No | The gateway's WireGuard public key; none until the gateway has made its pair. |
 | `rate` | string (US dollars, decimal) | Yes | Its monthly price when it was made, in US dollars (`"5.00"`); it does not change. |
 | `peers` | list of [TunnelPeer](#tunnelpeer) | Yes | The org's machines and routers on it. |
-| `members` | list of [TunnelMember](#tunnelmember) | Yes | Each sandbox's address in the subnet. |
+| `members` | list of [TunnelMember](#tunnelmember) | Yes | Each machine's address in the subnet. |
 
 ### Tunnel
 
-A WireGuard tunnel from the org's own network into its sandboxes.
+A WireGuard tunnel from the org's own network into its machines.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -112,7 +112,7 @@ A WireGuard tunnel from the org's own network into its sandboxes.
 | `gatewayPublicKey` | string | No | The gateway's WireGuard public key; none until the gateway has made its pair. |
 | `rate` | string (US dollars, decimal) | Yes | Its monthly price when it was made, in US dollars (`"5.00"`); it does not change. |
 | `peers` | list of [TunnelPeer](#tunnelpeer) | Yes | The org's machines and routers on it. |
-| `members` | list of [TunnelMember](#tunnelmember) | Yes | Each sandbox's address in the subnet. |
+| `members` | list of [TunnelMember](#tunnelmember) | Yes | Each machine's address in the subnet. |
 | `id` | string | Yes | Its ID. |
 | `object` | one of `tunnel` | Yes | Always `tunnel`. |
 | `state` | one of `making`, `ready`, `deleted` | Yes | Its state: `ready` once its gateway answers. |

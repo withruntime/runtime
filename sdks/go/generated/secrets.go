@@ -12,8 +12,10 @@ import (
 
 // SecretScope Which machines may use a secret.
 type SecretScope struct {
-	// LabelsAny Machines with every label of any one of these sets.
-	LabelsAny []map[string]string `json:"labelsAny"`
+	// LabelsAny Machines with every label of any one of these sets. Give this or `none`.
+	LabelsAny []map[string]string `json:"labelsAny,omitempty"`
+	// None `true`: no machine. Runtime alone uses the secret: it is in no machine's requests or environment. A registry login an image import pulls with (`pullSecret`) has this scope. Give this or `labelsAny`.
+	None *bool `json:"none,omitempty"`
 }
 
 // SecretRule Which requests to a secret's hosts may carry it.
@@ -121,6 +123,25 @@ func (q SecretListQuery) values() url.Values {
 	return v
 }
 
+// SecretGetQuery is what Get takes in its query.
+type SecretGetQuery struct {
+	// Wait Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60.
+	Wait *float64
+	// IfState The state the caller last read, which `wait` waits for it to leave.
+	IfState *string
+}
+
+func (q SecretGetQuery) values() url.Values {
+	v := url.Values{}
+	if q.Wait != nil {
+		v.Set("wait", strconv.FormatFloat(*q.Wait, 'f', -1, 64))
+	}
+	if q.IfState != nil {
+		v.Set("ifState", *q.IfState)
+	}
+	return v
+}
+
 // Secrets A value a machine uses, sealed at rest and never answered. Hidden (the default): the machine sees a placeholder, and the egress proxy puts the value in its place, only on HTTPS to the secret's hosts. Visible: the machine holds the value, in its environment variable and in /run/secrets/<envName>.
 type Secrets struct {
 	t *Transport
@@ -135,18 +156,18 @@ func (c *Secrets) List(ctx context.Context, q SecretListQuery, opts *RequestOpti
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Secrets) ListAll(ctx context.Context, q SecretListQuery, opts *RequestOptions) iter.Seq2[SecretInfo, error] {
-	return all(func(cursor *string) (*Page[SecretInfo], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[SecretInfo], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
 }
 
 // Get Returns a secret, without its value.
-func (c *Secrets) Get(ctx context.Context, name string, opts *RequestOptions) (*Secret, error) {
+func (c *Secrets) Get(ctx context.Context, name string, q SecretGetQuery, opts *RequestOptions) (*Secret, error) {
 	out := new(SecretInfo)
-	if err := c.t.Do(ctx, "GET", "/v2/secrets/"+url.PathEscape(name), nil, nil, Call{Idempotent: true}, opts, out); err != nil {
+	if err := c.t.Do(ctx, "GET", "/v2/secrets/"+url.PathEscape(name), q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
 	return newSecret(c, out), nil
@@ -185,8 +206,12 @@ func newSecret(c *Secrets, info *SecretInfo) *Secret {
 func (s *Secret) Name() string { return s.Info.Name }
 
 // Refresh Returns a secret, without its value.
-func (s *Secret) Refresh(ctx context.Context, opts *RequestOptions) error {
-	got, err := s.c.Get(ctx, s.Info.Name, opts)
+func (s *Secret) Refresh(ctx context.Context, q *SecretGetQuery, opts *RequestOptions) error {
+	var qb SecretGetQuery
+	if q != nil {
+		qb = *q
+	}
+	got, err := s.c.Get(ctx, s.Info.Name, qb, opts)
 	if err != nil {
 		return err
 	}

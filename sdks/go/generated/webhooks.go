@@ -80,9 +80,9 @@ func (c *Webhooks) List(ctx context.Context, q WebhookListQuery, opts *RequestOp
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Webhooks) ListAll(ctx context.Context, q WebhookListQuery, opts *RequestOptions) iter.Seq2[Webhook, error] {
-	return all(func(cursor *string) (*Page[Webhook], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[Webhook], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

@@ -5,290 +5,400 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # Which machines may use a secret.
-    # - +labels_any+: Machines with every label of any one of these sets.
-    SecretScope = Struct.new(:labels_any, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # Which machines may use a secret.
+  # - +labels_any+: Machines with every label of any one of these sets. Give this or `none`.
+  # - +none+: `true`: no machine. Runtime alone uses the secret: it is in no machine's requests or environment. A registry login an image import pulls with (`pullSecret`) has this scope. Give this or `labelsAny`.
+  SecretScope = Struct.new(:labels_any, :none, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          labels_any: h["labelsAny"],
-        )
-      end
-
-      def to_wire
-        {
-          "labelsAny" => self.labels_any,
-        }.compact
-      end
+      new(
+        labels_any: h["labelsAny"],
+        none: h["none"],
+      )
     end
 
-    # Which requests to a secret's hosts may carry it.
-    # - +methods+: Only these methods (`POST`); every method when omitted.
-    # - +paths+: Only these paths: exact (`/v1/chat/completions`), or a prefix ending in `/*`.
-    SecretRule = Struct.new(:methods, :paths, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "labelsAny" => self.labels_any,
+        "none" => self.none,
+      }.compact
+    end
+  end
 
-        new(
-          methods: h["methods"],
-          paths: h["paths"],
-        )
-      end
+  # Which requests to a secret's hosts may carry it.
+  # - +methods+: Only these methods (`POST`); every method when omitted.
+  # - +paths+: Only these paths: exact (`/v1/chat/completions`), or a prefix ending in `/*`.
+  SecretRule = Struct.new(:methods, :paths, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "methods" => self.methods,
-          "paths" => self.paths,
-        }.compact
-      end
+      new(
+        methods: h["methods"],
+        paths: h["paths"],
+      )
     end
 
-    # What a git push carrying a secret may update.
-    # - +push+: The branches a push may update: 1 to 16 patterns of 12 to 256 characters, `refs/heads/` then a branch name, `*` only at the end, and `{label.<key>}` for the machine's own label right below a fixed first segment (`refs/heads/task/{label.task}`). A tag, a delete or any other ref is refused, and so is every API write that moves a ref. Opening or editing a pull request, reviewing it, and commenting on a pull request or an issue go under any rule that allows the path. Any other API write goes only when a rule names its exact path, with no `*`. A secret with no rules makes no API write.
-    SecretGit = Struct.new(:push, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "methods" => self.methods,
+        "paths" => self.paths,
+      }.compact
+    end
+  end
 
-        new(
-          push: h["push"],
-        )
-      end
+  # What a git push carrying a secret may update.
+  # - +push+: The branches a push may update: 1 to 16 patterns of 12 to 256 characters, `refs/heads/` then a branch name, `*` only at the end, and `{label.<key>}` for the machine's own label right below a fixed first segment (`refs/heads/task/{label.task}`). A tag, a delete or any other ref is refused, and so is every API write that moves a ref. Opening or editing a pull request, reviewing it, and commenting on a pull request or an issue go under any rule that allows the path. Any other API write goes only when a rule names its exact path, with no `*`. A secret with no rules makes no API write.
+  SecretGit = Struct.new(:push, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "push" => self.push,
-        }.compact
-      end
+      new(
+        push: h["push"],
+      )
     end
 
-    # The GraphQL mutations a request carrying a secret may make.
-    # - +path+: The GraphQL endpoint's path; `/graphql` when omitted.
-    # - +mutations+: Only these mutations, by name (at most 64); a request making any other is refused.
-    SecretGraphql = Struct.new(:path, :mutations, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "push" => self.push,
+      }.compact
+    end
+  end
 
-        new(
-          path: h["path"],
-          mutations: h["mutations"],
-        )
-      end
+  # The GraphQL mutations a request carrying a secret may make.
+  # - +path+: The GraphQL endpoint's path; `/graphql` when omitted.
+  # - +mutations+: Only these mutations, by name (at most 64); a request making any other is refused.
+  SecretGraphql = Struct.new(:path, :mutations, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "path" => self.path,
-          "mutations" => self.mutations,
-        }.compact
-      end
+      new(
+        path: h["path"],
+        mutations: h["mutations"],
+      )
     end
 
-    # What API calls carrying a secret may do.
-    # - +graphql+: Its GraphQL mutations.
-    SecretApi = Struct.new(:graphql, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "path" => self.path,
+        "mutations" => self.mutations,
+      }.compact
+    end
+  end
 
-        new(
-          graphql: SecretGraphql.from(h["graphql"]),
-        )
-      end
+  # What API calls carrying a secret may do.
+  # - +graphql+: Its GraphQL mutations.
+  SecretApi = Struct.new(:graphql, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "graphql" => self.graphql&.to_wire,
-        }.compact
-      end
+      new(
+        graphql: SecretGraphql.from(h["graphql"]),
+      )
     end
 
-    # How a secret may be used, beyond its hosts: a request carries it only when every policy it holds allows it.
-    # - +rules+: Only requests one of these rules allows carry it; every request to its hosts when omitted. A set with its value and without rules removes them; one without its value keeps them, or narrows them to these.
-    # - +git+: Its git pushes' branches. Kept when a set leaves it out; only a set with the value changes it.
-    # - +api+: Its API calls' limits. Kept when a set leaves it out; only a set with the value changes it.
-    SecretPolicies = Struct.new(:rules, :git, :api, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "graphql" => self.graphql&.to_wire,
+      }.compact
+    end
+  end
 
-        new(
-          rules: h["rules"]&.map { |i| SecretRule.from(i) },
-          git: SecretGit.from(h["git"]),
-          api: SecretApi.from(h["api"]),
-        )
-      end
+  # How a secret may be used, beyond its hosts: a request carries it only when every policy it holds allows it.
+  # - +rules+: Only requests one of these rules allows carry it; every request to its hosts when omitted. A set with its value and without rules removes them; one without its value keeps them, or narrows them to these.
+  # - +git+: Its git pushes' branches. Kept when a set leaves it out; only a set with the value changes it.
+  # - +api+: Its API calls' limits. Kept when a set leaves it out; only a set with the value changes it.
+  SecretPolicies = Struct.new(:rules, :git, :api, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "rules" => self.rules&.map { |i| i&.to_wire },
-          "git" => self.git&.to_wire,
-          "api" => self.api&.to_wire,
-        }.compact
-      end
+      new(
+        rules: h["rules"]&.map { |i| SecretRule.from(i) },
+        git: SecretGit.from(h["git"]),
+        api: SecretApi.from(h["api"]),
+      )
     end
 
-    # A secret's settings: what it keeps beside its sealed value.
-    # - +visible+: The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted.
-    # - +hosts+: The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible.
-    # - +header+: The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only.
-    # - +format+: The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only.
-    # - +env_name+: The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name.
-    # - +scope+: The machines that may use it; every machine of the organization when omitted.
-    # - +policies+: How it may be used. Hidden secrets only.
-    SecretSettings = Struct.new(:visible, :hosts, :header, :format, :env_name, :scope, :policies, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "rules" => self.rules&.map { |i| i&.to_wire },
+        "git" => self.git&.to_wire,
+        "api" => self.api&.to_wire,
+      }.compact
+    end
+  end
 
-        new(
-          visible: h["visible"],
-          hosts: h["hosts"],
-          header: h["header"],
-          format: h["format"],
-          env_name: h["envName"],
-          scope: SecretScope.from(h["scope"]),
-          policies: SecretPolicies.from(h["policies"]),
-        )
-      end
+  # A secret's settings: what it keeps beside its sealed value.
+  # - +visible+: The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted.
+  # - +hosts+: The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible.
+  # - +header+: The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only.
+  # - +format+: The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only.
+  # - +env_name+: The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name.
+  # - +scope+: The machines that may use it; every machine of the organization when omitted.
+  # - +policies+: How it may be used. Hidden secrets only.
+  SecretSettings = Struct.new(:visible, :hosts, :header, :format, :env_name, :scope, :policies, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "visible" => self.visible,
-          "hosts" => self.hosts,
-          "header" => self.header,
-          "format" => self.format,
-          "envName" => self.env_name,
-          "scope" => self.scope&.to_wire,
-          "policies" => self.policies&.to_wire,
-        }.compact
-      end
+      new(
+        visible: h["visible"],
+        hosts: h["hosts"],
+        header: h["header"],
+        format: h["format"],
+        env_name: h["envName"],
+        scope: SecretScope.from(h["scope"]),
+        policies: SecretPolicies.from(h["policies"]),
+      )
     end
 
-    # A secret, without its value.
-    # - +visible+: The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted.
-    # - +hosts+: The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible.
-    # - +header+: The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only.
-    # - +format+: The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only.
-    # - +env_name+: The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name.
-    # - +scope+: The machines that may use it; every machine of the organization when omitted.
-    # - +policies+: How it may be used. Hidden secrets only.
-    # - +name+: Its name.
-    # - +object+: Always `secret`.
-    # - +state+: `active` while requests carry it; `deleted` once deleted: a delete's answer.
-    # - +placeholder+: What a machine holds in the value's place; none when visible.
-    # - +version+: Raised by each change.
-    # - +value_bytes+: Its value's length in bytes.
-    # - +updated_at+: When it was last changed.
-    # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
-    Secret = Struct.new(:visible, :hosts, :header, :format, :env_name, :scope, :policies, :name, :object, :state, :placeholder, :version, :value_bytes, :updated_at, :deleted_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "visible" => self.visible,
+        "hosts" => self.hosts,
+        "header" => self.header,
+        "format" => self.format,
+        "envName" => self.env_name,
+        "scope" => self.scope&.to_wire,
+        "policies" => self.policies&.to_wire,
+      }.compact
+    end
+  end
 
-        new(
-          visible: h["visible"],
-          hosts: h["hosts"],
-          header: h["header"],
-          format: h["format"],
-          env_name: h["envName"],
-          scope: SecretScope.from(h["scope"]),
-          policies: SecretPolicies.from(h["policies"]),
-          name: h["name"],
-          object: h["object"],
-          state: h["state"],
-          placeholder: h["placeholder"],
-          version: h["version"],
-          value_bytes: h["valueBytes"],
-          updated_at: h["updatedAt"],
-          deleted_at: h["deletedAt"],
-        )
-      end
+  # A secret, without its value.
+  # - +visible+: The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted.
+  # - +hosts+: The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible.
+  # - +header+: The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only.
+  # - +format+: The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only.
+  # - +env_name+: The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name.
+  # - +scope+: The machines that may use it; every machine of the organization when omitted.
+  # - +policies+: How it may be used. Hidden secrets only.
+  # - +name+: Its name.
+  # - +object+: Always `secret`.
+  # - +state+: `active` while requests carry it; `deleted` once deleted: a delete's answer.
+  # - +placeholder+: What a machine holds in the value's place; none when visible.
+  # - +version+: Raised by each change.
+  # - +value_bytes+: Its value's length in bytes.
+  # - +updated_at+: When it was last changed.
+  # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
+  SecretInfo = Struct.new(:visible, :hosts, :header, :format, :env_name, :scope, :policies, :name, :object, :state, :placeholder, :version, :value_bytes, :updated_at, :deleted_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "visible" => self.visible,
-          "hosts" => self.hosts,
-          "header" => self.header,
-          "format" => self.format,
-          "envName" => self.env_name,
-          "scope" => self.scope&.to_wire,
-          "policies" => self.policies&.to_wire,
-          "name" => self.name,
-          "object" => self.object,
-          "state" => self.state,
-          "placeholder" => self.placeholder,
-          "version" => self.version,
-          "valueBytes" => self.value_bytes,
-          "updatedAt" => self.updated_at,
-          "deletedAt" => self.deleted_at,
-        }.compact
-      end
+      new(
+        visible: h["visible"],
+        hosts: h["hosts"],
+        header: h["header"],
+        format: h["format"],
+        env_name: h["envName"],
+        scope: SecretScope.from(h["scope"]),
+        policies: SecretPolicies.from(h["policies"]),
+        name: h["name"],
+        object: h["object"],
+        state: h["state"],
+        placeholder: h["placeholder"],
+        version: h["version"],
+        value_bytes: h["valueBytes"],
+        updated_at: h["updatedAt"],
+        deleted_at: h["deletedAt"],
+      )
     end
 
-    # A secret to store or replace, or, without its value, to change.
-    # - +visible+: The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted.
-    # - +hosts+: The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible.
-    # - +header+: The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only.
-    # - +format+: The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only.
-    # - +env_name+: The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name.
-    # - +scope+: The machines that may use it; every machine of the organization when omitted.
-    # - +policies+: How it may be used. Hidden secrets only.
-    # - +value+: Its value, never answered. Hidden: 1 to 8192 visible ASCII characters and spaces, one line, since it goes into an HTTP header. Visible: 1 byte to 64 KiB of UTF-8 text with no NUL, newlines included (a PEM file, an SSH key, a service account's JSON). With it, the set stores the secret whole, as its fields say. Without it, the set changes only the hosts, `policies.rules` and scope it names, and keeps the rest: hosts and rules only narrow, since widening needs the value, and so does a visible secret's scope, whose machines hold its value; any other field is refused 400.
-    # - +expected_version+: Replaced only from this version; 409 otherwise.
-    SecretSet = Struct.new(:visible, :hosts, :header, :format, :env_name, :scope, :policies, :value, :expected_version, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "visible" => self.visible,
+        "hosts" => self.hosts,
+        "header" => self.header,
+        "format" => self.format,
+        "envName" => self.env_name,
+        "scope" => self.scope&.to_wire,
+        "policies" => self.policies&.to_wire,
+        "name" => self.name,
+        "object" => self.object,
+        "state" => self.state,
+        "placeholder" => self.placeholder,
+        "version" => self.version,
+        "valueBytes" => self.value_bytes,
+        "updatedAt" => self.updated_at,
+        "deletedAt" => self.deleted_at,
+      }.compact
+    end
+  end
 
-        new(
-          visible: h["visible"],
-          hosts: h["hosts"],
-          header: h["header"],
-          format: h["format"],
-          env_name: h["envName"],
-          scope: SecretScope.from(h["scope"]),
-          policies: SecretPolicies.from(h["policies"]),
-          value: h["value"],
-          expected_version: h["expectedVersion"],
-        )
-      end
+  # A secret to store or replace, or, without its value, to change.
+  # - +visible+: The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted.
+  # - +hosts+: The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible.
+  # - +header+: The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only.
+  # - +format+: The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only.
+  # - +env_name+: The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name.
+  # - +scope+: The machines that may use it; every machine of the organization when omitted.
+  # - +policies+: How it may be used. Hidden secrets only.
+  # - +value+: Its value, never answered. Hidden: 1 to 8192 visible ASCII characters and spaces, one line, since it goes into an HTTP header. Visible: 1 byte to 64 KiB of UTF-8 text with no NUL, newlines included (a PEM file, an SSH key, a service account's JSON). With it, the set stores the secret whole, as its fields say. Without it, the set changes only the hosts, `policies.rules` and scope it names, and keeps the rest: hosts and rules only narrow, since widening needs the value, and so does a visible secret's scope, whose machines hold its value; any other field is refused 400.
+  # - +expected_version+: Replaced only from this version; 409 otherwise.
+  SecretSet = Struct.new(:visible, :hosts, :header, :format, :env_name, :scope, :policies, :value, :expected_version, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "visible" => self.visible,
-          "hosts" => self.hosts,
-          "header" => self.header,
-          "format" => self.format,
-          "envName" => self.env_name,
-          "scope" => self.scope&.to_wire,
-          "policies" => self.policies&.to_wire,
-          "value" => self.value,
-          "expectedVersion" => self.expected_version,
-        }.compact
-      end
+      new(
+        visible: h["visible"],
+        hosts: h["hosts"],
+        header: h["header"],
+        format: h["format"],
+        env_name: h["envName"],
+        scope: SecretScope.from(h["scope"]),
+        policies: SecretPolicies.from(h["policies"]),
+        value: h["value"],
+        expected_version: h["expectedVersion"],
+      )
     end
 
-    # A value a machine uses, sealed at rest and never answered. Hidden (the default): the machine sees a placeholder, and the egress proxy puts the value in its place, only on HTTPS to the secret's hosts. Visible: the machine holds the value, in its environment variable and in /run/secrets/<envName>.
-    class Secrets
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "visible" => self.visible,
+        "hosts" => self.hosts,
+        "header" => self.header,
+        "format" => self.format,
+        "envName" => self.env_name,
+        "scope" => self.scope&.to_wire,
+        "policies" => self.policies&.to_wire,
+        "value" => self.value,
+        "expectedVersion" => self.expected_version,
+      }.compact
+    end
+  end
 
-      # Lists the organization's secrets by name, without their values.
-      def list(cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/secrets", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Secret.from(i) }
-      end
+  # One of secrets: A value a machine uses, sealed at rest and never answered. Hidden (the default): the machine sees a placeholder, and the egress proxy puts the value in its place, only on HTTPS to the secret's hosts. Visible: the machine holds the value, in its environment variable and in /run/secrets/<envName>.
+  class Secret
+    # What it was when last read, and what is under it.
+    attr_reader :info
 
-      # Returns a secret, without its value.
-      def get(name)
-        Secret.from(@transport.request("GET", "/v2/secrets/#{URI.encode_www_form_component(name)}", idempotent: true))
-      end
+    def initialize(client, info)
+      @c = client
+      @info = info
+    end
 
-      # Stores or replaces a secret with its value, or changes one without it. Replacing it keeps its placeholder and raises its version; machines' new requests carry the new value within a second, and a visible secret's file holds it within a second. A running machine's processes keep the environment they started with; new commands get the new one. Asked again with the same Idempotency-Key and body, it returns the secret as that request left it. A deleted secret's name stored again is a new secret with a new placeholder, and so is a visible secret stored hidden. Without its value, it changes only the hosts, rules (`policies.rules`) and scope it names and keeps every other setting: hosts and rules only narrow, refused 400 when wider, since widening needs the value; a visible secret's scope only narrows, since its machines hold its value, and its file is removed within a second from each machine the scope leaves out. A secret not stored yet needs its value (404).
-      def set(name, visible: nil, hosts: nil, header: nil, format: nil, env_name: nil, scope: nil, policies: nil, value: nil, expected_version: nil, idempotency_key: nil)
-        Secret.from(@transport.request("PUT", "/v2/secrets/#{URI.encode_www_form_component(name)}", body: { "visible" => visible, "hosts" => hosts, "header" => header, "format" => format, "envName" => env_name, "scope" => scope, "policies" => policies, "value" => value, "expectedVersion" => expected_version }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Its name.
+    def name
+      @info.name
+    end
 
-      # Deletes a secret and its value: no request carries it from then on, open connections' included, and a visible secret's file is removed from every machine within a second. Deleted again, it returns the same deleted secret.
-      def delete(name, idempotency_key: nil)
-        Secret.from(@transport.request("DELETE", "/v2/secrets/#{URI.encode_www_form_component(name)}", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # The machine holds the value itself, in its environment variable from its start and in the file `/run/secrets/<envName>` (mode 0400, owned by root), which is rewritten within a second of each change and removed within a second of a delete or a scope that leaves the machine out. For values the proxy cannot put in, such as a database password or an SSH key. Changed only by a set with the value; false when omitted.
+    def visible
+      @info.visible
+    end
+
+    # The hosts its value goes to on HTTPS: a name, or `*.` and a name for every name under it. Required unless visible; refused when visible.
+    def hosts
+      @info.hosts
+    end
+
+    # The header it is set in on every request to its hosts; when omitted, its placeholder is replaced in the credential headers (Authorization, x-api-key and the like). Hidden secrets only.
+    def header
+      @info.header
+    end
+
+    # The header's value, `{value}` replaced by the secret; `{value}` when omitted. Hidden secrets only.
+    def format
+      @info.format
+    end
+
+    # The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name.
+    def env_name
+      @info.env_name
+    end
+
+    # The machines that may use it; every machine of the organization when omitted.
+    def scope
+      @info.scope
+    end
+
+    # How it may be used. Hidden secrets only.
+    def policies
+      @info.policies
+    end
+
+    # Always `secret`.
+    def object
+      @info.object
+    end
+
+    # `active` while requests carry it; `deleted` once deleted: a delete's answer.
+    def state
+      @info.state
+    end
+
+    # What a machine holds in the value's place; none when visible.
+    def placeholder
+      @info.placeholder
+    end
+
+    # Raised by each change.
+    def version
+      @info.version
+    end
+
+    # Its value's length in bytes.
+    def value_bytes
+      @info.value_bytes
+    end
+
+    # When it was last changed.
+    def updated_at
+      @info.updated_at
+    end
+
+    # When it was deleted: a delete's answer, its state `deleted`.
+    def deleted_at
+      @info.deleted_at
+    end
+
+    def inspect
+      "#<Secret #{@info.inspect}>"
+    end
+
+    # Returns a secret, without its value.
+    def refresh(wait: nil, if_state: nil)
+      @info = @c.get(@info.name, wait: wait, if_state: if_state).info
+      self
+    end
+
+    # Stores or replaces a secret with its value, or changes one without it. Replacing it keeps its placeholder and raises its version; machines' new requests carry the new value within a second, and a visible secret's file holds it within a second. A running machine's processes keep the environment they started with; new commands get the new one. Asked again with the same Idempotency-Key and body, it returns the secret as that request left it. A deleted secret's name stored again is a new secret with a new placeholder, and so is a visible secret stored hidden. Without its value, it changes only the hosts, rules (`policies.rules`) and scope it names and keeps every other setting: hosts and rules only narrow, refused 400 when wider, since widening needs the value; a visible secret's scope only narrows, since its machines hold its value, and its file is removed within a second from each machine the scope leaves out. A secret not stored yet needs its value (404).
+    def set(visible: nil, hosts: nil, header: nil, format: nil, env_name: nil, scope: nil, policies: nil, value: nil, expected_version: nil, idempotency_key: nil)
+      @info = @c.set(@info.name, visible: visible, hosts: hosts, header: header, format: format, env_name: env_name, scope: scope, policies: policies, value: value, expected_version: expected_version, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Deletes a secret and its value: no request carries it from then on, open connections' included, and a visible secret's file is removed from every machine within a second. Deleted again, it returns the same deleted secret.
+    def delete(idempotency_key: nil)
+      @c.delete(@info.name, idempotency_key: idempotency_key)
+    end
+  end
+
+  # A value a machine uses, sealed at rest and never answered. Hidden (the default): the machine sees a placeholder, and the egress proxy puts the value in its place, only on HTTPS to the secret's hosts. Visible: the machine holds the value, in its environment variable and in /run/secrets/<envName>.
+  class Secrets
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Lists the organization's secrets by name, without their values.
+    def list(cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/secrets", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| SecretInfo.from(i) }
+    end
+
+    # Returns a secret, without its value.
+    def get(name, wait: nil, if_state: nil)
+      Secret.new(self, SecretInfo.from(@transport.request("GET", "/v2/secrets/#{URI.encode_www_form_component(name)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true)))
+    end
+
+    # Stores or replaces a secret with its value, or changes one without it. Replacing it keeps its placeholder and raises its version; machines' new requests carry the new value within a second, and a visible secret's file holds it within a second. A running machine's processes keep the environment they started with; new commands get the new one. Asked again with the same Idempotency-Key and body, it returns the secret as that request left it. A deleted secret's name stored again is a new secret with a new placeholder, and so is a visible secret stored hidden. Without its value, it changes only the hosts, rules (`policies.rules`) and scope it names and keeps every other setting: hosts and rules only narrow, refused 400 when wider, since widening needs the value; a visible secret's scope only narrows, since its machines hold its value, and its file is removed within a second from each machine the scope leaves out. A secret not stored yet needs its value (404).
+    def set(name, visible: nil, hosts: nil, header: nil, format: nil, env_name: nil, scope: nil, policies: nil, value: nil, expected_version: nil, idempotency_key: nil)
+      SecretInfo.from(@transport.request("PUT", "/v2/secrets/#{URI.encode_www_form_component(name)}", body: { "visible" => visible, "hosts" => hosts, "header" => header, "format" => format, "envName" => env_name, "scope" => scope, "policies" => policies, "value" => value, "expectedVersion" => expected_version }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Deletes a secret and its value: no request carries it from then on, open connections' included, and a visible secret's file is removed from every machine within a second. Deleted again, it returns the same deleted secret.
+    def delete(name, idempotency_key: nil)
+      SecretInfo.from(@transport.request("DELETE", "/v2/secrets/#{URI.encode_www_form_component(name)}", idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

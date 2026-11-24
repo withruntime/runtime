@@ -1,6 +1,6 @@
 # Serve a web app
 
-A preview gives one port of a sandbox an HTTPS address. Use it to show an agent's work, run a dev server, or test a web app before you deploy it.
+A preview gives one port of a machine an HTTPS address. Use it to show an agent's work, run a dev server, or test a web app before you deploy it.
 
 ## Start a server and share its port
 
@@ -40,7 +40,7 @@ try {
 - [`POST /v2/previews/{name}:rotate`](./reference/previews#rotate) refuses every token issued so far. [`POST /v2/previews/{name}:sign`](./reference/previews#sign) issues a new one.
 - [`DELETE /v2/previews/{name}`](./reference/previews#delete-a-preview) stops sharing the port.
 
-A preview's address answers once its [`state`](./reference/previews#preview) is `ready`. Deleting the sandbox removes its previews.
+A preview's address answers once its [`state`](./reference/previews#preview) is `ready`. Deleting a machine removes its previews.
 
 ## Next steps
 

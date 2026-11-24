@@ -41,12 +41,12 @@ Retries:
 - **The rename.** A rename that names `sha256` is safe to send again. If the file was already moved, the call returns `200` with the same response (`from`, `to`, `size`, `sha256`) as long as `from` no longer exists and `to` holds a file of that size whose bytes hash to `sha256`. If it was not moved, the call moves it. Sending the same `Idempotency-Key` is allowed but not needed: the file's own size and hash decide the result. A rename without `sha256` is not safe to retry: once moved, it returns `404` for `from`.
 - **Checking the result.** Instead of retrying, you can call stat with `sha256=true` on the final path and compare `size` and `sha256` with your own.
 
-A listed folder gives each entry's type, size, mode and time. A sandbox's files last as long as the sandbox. To keep them after it is deleted, take a [snapshot](./snapshots).
+A listed folder gives each entry's type, size, mode and time. A machine's files last as long as the machine. To keep them after it is deleted, take a [snapshot](./snapshots).
 
 ## Give this to your agent
 
 Paste this into your coding agent:
 
-> Read https://withruntime.com/docs/files.md. Move this project's files into and out of Runtime sandboxes with the files calls; a write streams, so a file of any size is one call.
+> Read https://withruntime.com/docs/files.md. Move this project's files into and out of Runtime machines with the files calls; a write streams, so a file of any size is one call.
 >
 > This page as Markdown: https://withruntime.com/docs/files.md

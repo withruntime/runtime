@@ -2,7 +2,7 @@
 
 | Modal | Runtime |
 | --- | --- |
-| `modal.Sandbox.create(app=app, image=image)` | [`POST /v2/sandboxes`](./reference/sandboxes#create-a-sandbox), with [`image`](./reference/sandboxes#sandboxcreate) or [`snapshot`](./reference/sandboxes#sandboxcreate) |
+| `modal.Sandbox.create(app=app, image=image)` | [`POST /v2/sandboxes`](./reference/sandboxes#create-a-sandbox), with [`image`](./reference/sandboxes#sandboxcreate) or [`from`](./reference/sandboxes#sandboxcreate) |
 | `sb.exec("python", "-c", code)` | [`POST /v2/sandboxes/{id}:exec`](./reference/sandboxes#exec), with [`wait`](./reference/sandboxes#execrequest) false to read output as it comes |
 | `sb.open(path, "w")` | [`PUT /v2/sandboxes/{id}/files`](./reference/sandboxes#write) |
 | `sb.tunnels()` | [`POST /v2/sandboxes/{id}/previews`](./reference/previews#create-a-preview) |
@@ -22,7 +22,7 @@ finally:
     runtime.sandboxes.delete(sandbox.id)
 ```
 
-Runtime bills the CPU a sandbox uses, $0.03 per busy vCPU-hour, and a paused sandbox pays only for storage, $0.18 per GB-month.
+Runtime bills the CPU a sandbox uses, $0.03 per active vCPU-hour, and a paused sandbox pays only for storage, $0.18 per GiB-month.
 
 ## Give this to your agent
 

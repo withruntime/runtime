@@ -53,8 +53,8 @@ result = runtime.sessions.create(machine_id="example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sessions.create(machine_id: "example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sessions.create(machine_id: "example")
 ```
 
 ```bash title="CLI"
@@ -99,8 +99,8 @@ result = runtime.sessions.delete("SESSION_ID")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.sessions.delete("SESSION_ID")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.sessions.delete("SESSION_ID")
 ```
 
 ```bash title="CLI"

@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** A static egress IP: a public address every sandbox of the org sends from, the same every time, for others' allow-lists. */
+/** A static egress IP: a public address every machine of the org sends from, the same every time, for others' allow-lists. */
 public final class EgressIps {
   private final Transport t;
 
@@ -49,7 +49,7 @@ public final class EgressIps {
     }
   }
 
-  /** A static egress IP: every sandbox of the org sends from it. */
+  /** A static egress IP: every machine of the org sends from it. */
   public static final class EgressIp {
     /** 4 or 6. */
     public Long family;
@@ -66,10 +66,10 @@ public final class EgressIps {
     /** The address. */
     public String address;
 
-    /** Its state: `ready` once sandboxes send from it. */
+    /** Its state: `ready` once machines send from it. */
     public String state;
 
-    /** Turned off: its sandboxes send from the shared addresses. */
+    /** Turned off: its machines send from the shared addresses. */
     public Boolean disabled;
 
     /** When it was reserved. */

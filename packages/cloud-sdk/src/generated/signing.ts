@@ -220,7 +220,9 @@ export async function authorize(
   r: Omit<RequestToSign, "key" | "project"> & { project?: string | undefined },
 ): Promise<Record<string, string>> {
   const key = signingKeyFor(apiKey, r.project);
-  if (!key) return { authorization: `Bearer ${apiKey}` };
+  // The project goes with every call, a bearer key's too: a key that reaches
+  // the whole org would otherwise list, change and delete in every project.
+  if (!key) return { authorization: `Bearer ${apiKey}`, ...(r.project ? { "runtime-project": r.project } : {}) };
   return signRequest({ ...r, key, project: r.project! });
 }
 

@@ -55,7 +55,7 @@ type KeyUsage struct {
 
 // KeySpendCap The spend cap a key's creates are held to, and what is left under it.
 type KeySpendCap struct {
-	// Cap The most its holder's sandboxes may spend over windowSeconds, in US dollars.
+	// Cap The most its holder's machines may spend over windowSeconds, in US dollars.
 	Cap string `json:"cap"`
 	// Spent What they spent over the window, in US dollars, as the cap counts it.
 	Spent string `json:"spent"`
@@ -63,6 +63,52 @@ type KeySpendCap struct {
 	Remaining string `json:"remaining"`
 	// WindowSeconds The rolling window the cap counts over, in seconds.
 	WindowSeconds int64 `json:"windowSeconds"`
+}
+
+// UsageHour One product's use in one hour, at the card's prices.
+type UsageHour struct {
+	// At The hour's first moment (UTC).
+	At string `json:"at"`
+	// Product What it was used by: the machine's kind (`sandbox`, `app`, `function`, `ci`, ...), what is kept on disk (`disk`, `volume`, `snapshot`, `image`), or `traffic`, what was sent out; `machine` or `storage` when what used it was deleted too long ago to name.
+	Product string `json:"product"`
+	// Charged What it costs on the price card, before any credit, in US dollars.
+	Charged string `json:"charged"`
+}
+
+// ProductLine One meter's part of one product's month: a quantity at the card's rate.
+type ProductLine struct {
+	// Product What it was used by, as `hours` names it (`sandbox`, `disk`, `traffic`, ...).
+	Product string `json:"product"`
+	// Meter The card's meter (`cpu`, `memory`, `traffic-out`, ...).
+	Meter string `json:"meter"`
+	// Name The meter's name on the card (`CPU`, `Memory`), from `names::METERS`.
+	Name string `json:"name"`
+	// Quantity Used this month, in `unit`, as a decimal in text.
+	Quantity string `json:"quantity"`
+	// Unit What `quantity` counts: `active vCPU-hours`, `GiB-hours`, `GiB-months`, `GB`, ...
+	Unit string `json:"unit"`
+	// Rate The card's price for one of `unit`, as the card writes it (`$0.03 per active vCPU-hour`).
+	Rate string `json:"rate"`
+	// Charged What it costs on the price card, before any credit, in US dollars.
+	Charged string `json:"charged"`
+}
+
+// KeySpend What one key, or what was made with no key, used this month.
+type KeySpend struct {
+	// KeyID The key the machines and storage were made with. Omitted for what was made with no key (signed in to the console), and for `others`.
+	KeyID *string `json:"keyId,omitempty"`
+	// Name The key's name.
+	Name *string `json:"name,omitempty"`
+	// AccountID The person the key acts for, or who made it signed in to the console.
+	AccountID *string `json:"accountId,omitempty"`
+	// Email That person's email address.
+	Email *string `json:"email,omitempty"`
+	// AgentID The agent or CI pipeline the key acts as.
+	AgentID *string `json:"agentId,omitempty"`
+	// Source `key`: one key's. `console`: made signed in, with no key. `others`: keys the caller may not see, together. `unknown`: made by something deleted too long ago to name.
+	Source string `json:"source"`
+	// Charged Charged this month at the card's rates, in US dollars.
+	Charged string `json:"charged"`
 }
 
 // Usage What the org has used and has left, at the card's prices.
@@ -91,6 +137,12 @@ type Usage struct {
 	Key *KeyUsage `json:"key,omitempty"`
 	// KeySpendCap The spend cap this key's creates are held to: the tightest of its own, those of the keys it was made with, and its holder's grants'. Omitted when none holds it.
 	KeySpendCap *KeySpendCap `json:"keySpendCap,omitempty"`
+	// Hours With `by=hour`: what each product used each hour, since the month began or 7 days ago, whichever is earlier, oldest first. Only hours that cost something.
+	Hours []UsageHour `json:"hours,omitempty"`
+	// Lines With `by=hour`: what each product's month is made of, a line for each meter it used, its quantity at the card's rate. A product's lines sum to its hours since the month began.
+	Lines []ProductLine `json:"lines,omitempty"`
+	// Keys With `by=key`: what each key's machines and storage used this month, most first. A key the caller may not see is counted under `others`.
+	Keys []KeySpend `json:"keys,omitempty"`
 }
 
 // UsageLine One meter of one machine's, disk's or address's hour, as measured, at the card's price.
@@ -99,7 +151,7 @@ type UsageLine struct {
 	ID string `json:"id"`
 	// SubjectID The resource it was used by: a machine, a disk or an address.
 	SubjectID string `json:"subjectId"`
-	// ResourceID The ID its product names it by (a sandbox's own ID).
+	// ResourceID The ID its product names it by (a machine's own ID).
 	ResourceID string `json:"resourceId"`
 	// ProjectID Its project.
 	ProjectID string `json:"projectId"`
@@ -145,12 +197,17 @@ type UsageExport struct {
 type UsageGetQuery struct {
 	// Key One key's spend too, by its ID: a key the caller may see (its own holder's, or any for an owner or admin); any other is 404.
 	Key *string
+	// By Splits too (repeat it for both): `hour`, what each product used each hour (`hours`); `key`, what each key used this month (`keys`).
+	By []string
 }
 
 func (q UsageGetQuery) values() url.Values {
 	v := url.Values{}
 	if q.Key != nil {
 		v.Set("key", *q.Key)
+	}
+	for _, x := range q.By {
+		v.Add("by", x)
 	}
 	return v
 }
@@ -163,7 +220,7 @@ type UsageExportQuery struct {
 	Until string
 	// By What the range selects lines by: `hour`, each line's hour's start, or `settled`, its settledAt (its hour's end), of hours that have ended. Ranges by `settled`, each from the last one's end to no later than `finalThrough`, read every line once, final. Default: "hour".
 	By *string
-	// ResourceID Only the usage of these resources (repeat it for several, up to 100): each line's `resourceId`, such as a sandbox's ID.
+	// ResourceID Only the usage of these resources (repeat it for several, up to 100): each line's `resourceId`, such as a machine's ID.
 	ResourceID []string
 	// Cursor Where the page starts: a page's `next`.
 	Cursor *string

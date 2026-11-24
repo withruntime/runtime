@@ -20,7 +20,7 @@ curl -sf -X POST "$api/sandboxes/$id:exec" -H "$auth" -H "Content-Type: applicat
   -d "{\"cmd\": [\"python3\", \"-c\", \"import json, os; e = json.loads(os.environ['EVENT']); print(e['amount'] / 100)\"], \"env\": {\"EVENT\": $(printf '%s' "$event" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}}"
 ```
 
-Runtime bills the CPU a sandbox uses, $0.03 per busy vCPU-hour, and the memory it holds, $0.008 per GB-hour, while it runs. Scheduled runs are [jobs](./reference/jobs). An HTTP endpoint that starts a copy per request is not on Runtime yet.
+Runtime bills the CPU a sandbox uses, $0.03 per active vCPU-hour, and the memory it holds, $0.008 per GiB-hour, while it runs. Scheduled runs are [jobs](./reference/jobs). An HTTP endpoint that starts a copy per request is not on Runtime yet.
 
 ## Give this to your agent
 

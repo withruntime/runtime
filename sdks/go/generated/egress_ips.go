@@ -18,7 +18,7 @@ type EgressIpSettings struct {
 	Rate string `json:"rate"`
 }
 
-// EgressIp A static egress IP: every sandbox of the org sends from it.
+// EgressIp A static egress IP: every machine of the org sends from it.
 type EgressIp struct {
 	EgressIpSettings
 	// ID Its ID.
@@ -27,9 +27,9 @@ type EgressIp struct {
 	Object string `json:"object"`
 	// Address The address.
 	Address string `json:"address"`
-	// State Its state: `ready` once sandboxes send from it.
+	// State Its state: `ready` once machines send from it.
 	State string `json:"state"`
-	// Disabled Turned off: its sandboxes send from the shared addresses.
+	// Disabled Turned off: its machines send from the shared addresses.
 	Disabled bool `json:"disabled"`
 	// CreatedAt When it was reserved.
 	CreatedAt string `json:"createdAt"`
@@ -54,7 +54,7 @@ func (q EgressIpListQuery) values() url.Values {
 	return v
 }
 
-// EgressIps A static egress IP: a public address every sandbox of the org sends from, the same every time, for others' allow-lists.
+// EgressIps A static egress IP: a public address every machine of the org sends from, the same every time, for others' allow-lists.
 type EgressIps struct {
 	t *Transport
 }
@@ -68,9 +68,9 @@ func (c *EgressIps) List(ctx context.Context, q EgressIpListQuery, opts *Request
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *EgressIps) ListAll(ctx context.Context, q EgressIpListQuery, opts *RequestOptions) iter.Seq2[EgressIp, error] {
-	return all(func(cursor *string) (*Page[EgressIp], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[EgressIp], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

@@ -80,9 +80,9 @@ func (c *Audit) List(ctx context.Context, q AuditLineListQuery, opts *RequestOpt
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *Audit) ListAll(ctx context.Context, q AuditLineListQuery, opts *RequestOptions) iter.Seq2[AuditLine, error] {
-	return all(func(cursor *string) (*Page[AuditLine], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[AuditLine], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})

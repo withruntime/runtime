@@ -57,8 +57,8 @@ result = runtime.events.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.events.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.events.list
 ```
 
 ```bash title="CLI"
@@ -84,4 +84,5 @@ A lifecycle event: what changed, as a webhook is sent it.
 | `state` | string | No | The resource's state after it, when it says one. |
 | `reason` | string | No | Why, when it says why (a stop's or a failure's). |
 | `exitCode` | integer | No | The exit code of a run that ended. |
+| `pausedAt` | string (RFC 3339) | No | When the resource's pause began (or its run ended), on an event of it paused or stopped. |
 | `createdAt` | string (RFC 3339) | Yes | When it happened. |

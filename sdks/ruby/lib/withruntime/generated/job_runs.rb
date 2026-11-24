@@ -6,105 +6,105 @@ require_relative "runtime"
 require_relative "sandboxes"
 
 module Withruntime
-  module Generated
-    # One run of a job: a machine made at one of its times, deleted when its command ended.
-    # - +id+: Its ID.
-    # - +object+: Always `job.run`.
-    # - +job+: Its job's ID.
-    # - +state+: Its machine's state: `starting` and `running` while it runs, `deleted` once it ended, `error` when it failed to start.
-    # - +at+: The time it is for: its schedule's, or when it was asked for.
-    # - +attempt+: Its attempt at that time, from 1.
-    # - +manual+: Someone asked for it (`run`), rather than its schedule.
-    # - +created_at+: When it was made.
-    # - +ended_at+: When its command ended.
-    # - +exit_code+: Its command's exit code, once it ended; none for one a signal or its timeout ended, or one deleted before its end.
-    # - +succeeded+: It ended with exit code 0.
-    # - +output_bytes+: How many bytes its command wrote, stdout and stderr together.
-    JobRun = Struct.new(:id, :object, :job, :state, :at, :attempt, :manual, :created_at, :ended_at, :exit_code, :succeeded, :output_bytes, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # One run of a job: a machine made at one of its times, deleted when its command ended.
+  # - +id+: Its ID.
+  # - +object+: Always `job.run`.
+  # - +job+: Its job's ID.
+  # - +state+: Its machine's state: `starting` and `running` while it runs, `deleted` once it ended, `error` when it failed to start.
+  # - +at+: The time it is for: its schedule's, or when it was asked for.
+  # - +attempt+: Its attempt at that time, from 1.
+  # - +manual+: Someone asked for it (`run`), rather than its schedule.
+  # - +created_at+: When it was made.
+  # - +ended_at+: When its command ended.
+  # - +exit_code+: Its command's exit code, once it ended; none for one a signal or its timeout ended, or one deleted before its end.
+  # - +succeeded+: It ended with exit code 0.
+  # - +output_bytes+: How many bytes its command wrote, stdout and stderr together.
+  JobRun = Struct.new(:id, :object, :job, :state, :at, :attempt, :manual, :created_at, :ended_at, :exit_code, :succeeded, :output_bytes, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          job: h["job"],
-          state: h["state"],
-          at: h["at"],
-          attempt: h["attempt"],
-          manual: h["manual"],
-          created_at: h["createdAt"],
-          ended_at: h["endedAt"],
-          exit_code: h["exitCode"],
-          succeeded: h["succeeded"],
-          output_bytes: h["outputBytes"],
-        )
-      end
-
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "job" => self.job,
-          "state" => self.state,
-          "at" => self.at,
-          "attempt" => self.attempt,
-          "manual" => self.manual,
-          "createdAt" => self.created_at,
-          "endedAt" => self.ended_at,
-          "exitCode" => self.exit_code,
-          "succeeded" => self.succeeded,
-          "outputBytes" => self.output_bytes,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        object: h["object"],
+        job: h["job"],
+        state: h["state"],
+        at: h["at"],
+        attempt: h["attempt"],
+        manual: h["manual"],
+        created_at: h["createdAt"],
+        ended_at: h["endedAt"],
+        exit_code: h["exitCode"],
+        succeeded: h["succeeded"],
+        output_bytes: h["outputBytes"],
+      )
     end
 
-    # A run's output, stdout and stderr together in the order written, after a cursor: its last 256 KiB are kept.
-    # - +chunks+: The output, in the order it was written.
-    # - +next_cursor+: The cursor to read on from.
-    # - +truncated+: Output before what is kept was dropped, past the cursor.
-    # - +complete+: The run ended and nothing is left past the next cursor.
-    JobRunOutput = Struct.new(:chunks, :next_cursor, :truncated, :complete, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "id" => self.id,
+        "object" => self.object,
+        "job" => self.job,
+        "state" => self.state,
+        "at" => self.at,
+        "attempt" => self.attempt,
+        "manual" => self.manual,
+        "createdAt" => self.created_at,
+        "endedAt" => self.ended_at,
+        "exitCode" => self.exit_code,
+        "succeeded" => self.succeeded,
+        "outputBytes" => self.output_bytes,
+      }.compact
+    end
+  end
 
-        new(
-          chunks: h["chunks"]&.map { |i| OutputChunk.from(i) },
-          next_cursor: h["nextCursor"],
-          truncated: h["truncated"],
-          complete: h["complete"],
-        )
-      end
+  # A run's output, stdout and stderr together in the order written, after a cursor: its last 256 KiB are kept.
+  # - +chunks+: The output, in the order it was written.
+  # - +next_cursor+: The cursor to read on from.
+  # - +truncated+: Output before what is kept was dropped, past the cursor.
+  # - +complete+: The run ended and nothing is left past the next cursor.
+  JobRunOutput = Struct.new(:chunks, :next_cursor, :truncated, :complete, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "chunks" => self.chunks&.map { |i| i&.to_wire },
-          "nextCursor" => self.next_cursor,
-          "truncated" => self.truncated,
-          "complete" => self.complete,
-        }.compact
-      end
+      new(
+        chunks: h["chunks"]&.map { |i| OutputChunk.from(i) },
+        next_cursor: h["nextCursor"],
+        truncated: h["truncated"],
+        complete: h["complete"],
+      )
     end
 
-    # One run of a job: a machine made at one of its times, deleted when its command ends. Its record (exit code, times, the last 256 KiB of its output) stays readable for 7 days after.
-    class JobRuns
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "chunks" => self.chunks&.map { |i| i&.to_wire },
+        "nextCursor" => self.next_cursor,
+        "truncated" => self.truncated,
+        "complete" => self.complete,
+      }.compact
+    end
+  end
 
-      # Lists a job's runs, oldest first unless `order` is `newest`, deleted ones included while their records are kept.
-      def list(job:, order: nil, cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/job-runs", query: { "job" => job, "order" => order, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| JobRun.from(i) }
-      end
+  # One run of a job: a machine made at one of its times, deleted when its command ends. Its record (exit code, times, the last 256 KiB of its output) stays readable for 7 days after.
+  class JobRuns
+    attr_reader :transport
 
-      # Returns a run.
-      def get(id)
-        JobRun.from(@transport.request("GET", "/v2/job-runs/#{URI.encode_www_form_component(id)}", idempotent: true))
-      end
+    def initialize(transport)
+      @transport = transport
+    end
 
-      # Returns a run's output after a cursor, stdout and stderr together in the order written, and the cursor to read on from. Its last 256 KiB are kept; truncated says when the cursor fell before them.
-      def output(id, cursor: nil, max_bytes: nil)
-        JobRunOutput.from(@transport.request("GET", "/v2/job-runs/#{URI.encode_www_form_component(id)}/output", query: { "cursor" => cursor, "maxBytes" => max_bytes }, idempotent: true))
-      end
+    # Lists a job's runs, oldest first unless `order` is `newest`, deleted ones included while their records are kept.
+    def list(job:, order: nil, cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/job-runs", query: { "job" => job, "order" => order, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| JobRun.from(i) }
+    end
+
+    # Returns a run.
+    def get(id, wait: nil, if_state: nil)
+      JobRun.from(@transport.request("GET", "/v2/job-runs/#{URI.encode_www_form_component(id)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true))
+    end
+
+    # Returns a run's output after a cursor, stdout and stderr together in the order written, and the cursor to read on from. Its last 256 KiB are kept; truncated says when the cursor fell before them.
+    def output(id, cursor: nil, max_bytes: nil)
+      JobRunOutput.from(@transport.request("GET", "/v2/job-runs/#{URI.encode_www_form_component(id)}/output", query: { "cursor" => cursor, "maxBytes" => max_bytes }, idempotent: true))
     end
   end
 end

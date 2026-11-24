@@ -4,58 +4,187 @@
 require "uri"
 require_relative "runtime"
 require_relative "sandboxes"
+require_relative "snapshots"
 
 module Withruntime
-  module Generated
-    # A volume to create: an empty disk, formatted ext4 at its first mount.
-    # - +name+: Its name, unique in its project among volumes.
-    # - +labels+: Labels to find it by.
-    # - +size_mib+: Its size in MiB, 64 to 409600 (400 GiB).
-    VolumeCreate = Struct.new(:name, :labels, :size_mib, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A volume to create: an empty disk, formatted ext4 at its first mount.
+  # - +name+: Its name, unique in its project among volumes.
+  # - +labels+: Labels to find it by.
+  # - +size_mib+: Its size in MiB, 64 to 409600 (400 GiB).
+  # - +delete_after_seconds+: Seconds until Runtime deletes it and what it holds, as its delete does: final, and it can't be undone; one attached to a machine is deleted once that machine ends. 0 or omitted: kept until deleted. At least 0. At most 315360000.
+  # - +delete_protection+: Whether its delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`.
+  VolumeCreate = Struct.new(:name, :labels, :size_mib, :delete_after_seconds, :delete_protection, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          name: h["name"],
-          labels: h["labels"],
-          size_mib: h["sizeMiB"],
-        )
-      end
-
-      def to_wire
-        {
-          "name" => self.name,
-          "labels" => self.labels,
-          "sizeMiB" => self.size_mib,
-        }.compact
-      end
+      new(
+        name: h["name"],
+        labels: h["labels"],
+        size_mib: h["sizeMiB"],
+        delete_after_seconds: h["deleteAfterSeconds"],
+        delete_protection: h["deleteProtection"],
+      )
     end
 
-    # A disk that outlives the machines it is attached to.
-    class Volumes
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "name" => self.name,
+        "labels" => self.labels,
+        "sizeMiB" => self.size_mib,
+        "deleteAfterSeconds" => self.delete_after_seconds,
+        "deleteProtection" => self.delete_protection,
+      }.compact
+    end
+  end
 
-      # Creates an empty volume. Asked again with the same Idempotency-Key, it returns the same one.
-      def create(name: nil, labels: nil, size_mib:, idempotency_key: nil)
-        Stored.from(@transport.request("POST", "/v2/volumes", body: { "name" => name, "labels" => labels, "sizeMiB" => size_mib }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+  # One of volumes: A disk that outlives the machines it is attached to.
+  class Volume
+    # What it was when last read, and what is under it.
+    attr_reader :info
 
-      # Lists the project's volumes, newest first.
-      def list(name: nil, state: nil, label: nil, cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/volumes", query: { "name" => name, "state" => state, "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Stored.from(i) }
-      end
+    def initialize(client, info)
+      @c = client
+      @info = info
+    end
 
-      # Returns a volume.
-      def get(id)
-        Stored.from(@transport.request("GET", "/v2/volumes/#{URI.encode_www_form_component(id)}", idempotent: true))
-      end
+    # Its id.
+    def id
+      @info.id
+    end
 
-      # Deletes a volume and what it holds. One attached to a sandbox is refused: delete the sandbox first.
-      def delete(id, idempotency_key: nil)
-        Stored.from(@transport.request("DELETE", "/v2/volumes/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
-      end
+    # Its kind: `snapshot`, `image` or `volume`.
+    def object
+      @info.object
+    end
+
+    # Its name, unique in its project among its kind.
+    def name
+      @info.name
+    end
+
+    # Where it is.
+    def state
+      @info.state
+    end
+
+    # Its labels.
+    def labels
+      @info.labels
+    end
+
+    # What it was made to hold, in bytes.
+    def size_bytes
+      @info.size_bytes
+    end
+
+    # What it holds now, in bytes.
+    def stored_bytes
+      @info.stored_bytes
+    end
+
+    # What it was made from (a snapshot's machine, an image's base), if anything.
+    def parent_id
+      @info.parent_id
+    end
+
+    # The machine it is attached to now, if any.
+    def attached_to
+      @info.attached_to
+    end
+
+    # When it was made.
+    def created_at
+      @info.created_at
+    end
+
+    # An image's version of its name: each build or keep of a name is its next.
+    def version
+      @info.version
+    end
+
+    # An image's tags, each `name:tag`.
+    def tags
+      @info.tags
+    end
+
+    # Why an image's build failed.
+    def error
+      @info.error
+    end
+
+    # When it was deleted: a delete's answer, its state `deleted`.
+    def deleted_at
+      @info.deleted_at
+    end
+
+    # When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted.
+    def delete_at
+      @info.delete_at
+    end
+
+    # Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does.
+    def delete_waits_for
+      @info.delete_waits_for
+    end
+
+    # Whether its delete is refused (409 `delete_protected`) until an update turns this off.
+    def delete_protection
+      @info.delete_protection
+    end
+
+    def inspect
+      "#<Volume #{@info.inspect}>"
+    end
+
+    # Returns a volume.
+    def refresh(wait: nil, if_state: nil)
+      @info = @c.get(@info.id, wait: wait, if_state: if_state).info
+      self
+    end
+
+    # Deletes a volume and what it holds. One attached to a machine is refused: delete the machine first.
+    def delete(idempotency_key: nil)
+      @c.delete(@info.id, idempotency_key: idempotency_key)
+    end
+
+    # Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+    def update(delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      @info = @c.update(@info.id, delete_after_seconds: delete_after_seconds, delete_protection: delete_protection, idempotency_key: idempotency_key)
+      self
+    end
+  end
+
+  # A disk that outlives the machines it is attached to.
+  class Volumes
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Creates an empty volume. Asked again with the same Idempotency-Key, it returns the same one.
+    def create(name: nil, labels: nil, size_mib:, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Volume.new(self, Stored.from(@transport.request("POST", "/v2/volumes", body: { "name" => name, "labels" => labels, "sizeMiB" => size_mib, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true)))
+    end
+
+    # Lists the project's volumes, newest first.
+    def list(name: nil, state: nil, label: nil, cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/volumes", query: { "name" => name, "state" => state, "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Stored.from(i) }
+    end
+
+    # Returns a volume.
+    def get(id, wait: nil, if_state: nil)
+      Volume.new(self, Stored.from(@transport.request("GET", "/v2/volumes/#{URI.encode_www_form_component(id)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true)))
+    end
+
+    # Deletes a volume and what it holds. One attached to a machine is refused: delete the machine first.
+    def delete(id, idempotency_key: nil)
+      Stored.from(@transport.request("DELETE", "/v2/volumes/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
+    end
+
+    # Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+    def update(id, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Stored.from(@transport.request("POST", "/v2/volumes/#{URI.encode_www_form_component(id)}:update", body: { "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

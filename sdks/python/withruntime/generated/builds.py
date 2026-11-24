@@ -22,6 +22,8 @@ from .sandboxes import SandboxInfo
 from .sandboxes import Terminal
 from .sandboxes import ExecRequest
 from .sandboxes import Process
+from .sandboxes import ExecEventError
+from .sandboxes import ExecEvent
 from .sandboxes import FileWritten
 from .sandboxes import OutputChunk
 from .sandboxes import ProcessOutput
@@ -152,6 +154,10 @@ class BuildProcesses:
         """Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe."""
         return self._c.signal_process(self._id, process, signal=signal, idempotency_key=idempotency_key)
 
+    def resize(self, process: str, *, cols: int, rows: int, idempotency_key: Optional[str] = None) -> Process:
+        """Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe."""
+        return self._c.resize_process(self._id, process, cols=cols, rows=rows, idempotency_key=idempotency_key)
+
     def list(self) -> ProcessList:
         """Lists a build's processes, newest first: those running and those that ended lately."""
         return self._c.list_processes(self._id)
@@ -189,8 +195,129 @@ class Build:
         """Its id."""
         return self.info.id
 
+    @property
+    def vcpu(self) -> Optional[int]:
+        """Its vCPUs; its product's default when omitted."""
+        return self.info.vcpu
+
+    @property
+    def memory_gb(self) -> Optional[float]:
+        """Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted."""
+        return self.info.memory_gb
+
+    @property
+    def disk_gb(self) -> Optional[float]:
+        """Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger."""
+        return self.info.disk_gb
+
+    @property
+    def image(self) -> Optional[str]:
+        """The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted."""
+        return self.info.image
+
+    @property
+    def secrets(self) -> Optional[List[str]]:
+        """The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it."""
+        return self.info.secrets
+
+    @property
+    def start(self) -> Optional["MachineStart"]:
+        """The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted."""
+        return self.info.start
+
+    @property
+    def user(self) -> Optional[Literal["runtime", "root", "unknown"]]:
+        """Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`."""
+        return self.info.user
+
+    @property
+    def object(self) -> Literal["sandbox", "function", "app", "site", "ci", "browser", "desktop", "notebook", "workspace", "container", "build", "agent.session", "unknown"]:
+        """Its product's kind: `sandbox` for a sandbox, `app` for an app, and so on."""
+        return self.info.object
+
+    @property
+    def name(self) -> Optional[str]:
+        """Its name, unique in its project."""
+        return self.info.name
+
+    @property
+    def state(self) -> Literal["starting", "running", "paused", "deleted", "error", "unknown"]:
+        """Where it is."""
+        return self.info.state
+
+    @property
+    def labels(self) -> Dict[str, str]:
+        """Its labels."""
+        return self.info.labels
+
+    @property
+    def created_at(self) -> Optional[str]:
+        """When it was created."""
+        return self.info.created_at
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer alone."""
+        return self.info.deleted_at
+
+    @property
+    def revision(self) -> Optional[int]:
+        """Its revision, changed by every change to it: what an update's If-Match names."""
+        return self.info.revision
+
+    @property
+    def idle_pause_seconds(self) -> Optional[int]:
+        """Seconds with nothing happening before it pauses; 0 never."""
+        return self.info.idle_pause_seconds
+
+    @property
+    def max_cost(self) -> Optional[str]:
+        """The most it may cost in all, in US dollars; none when it has no such cap."""
+        return self.info.max_cost
+
+    @property
+    def auto_wake(self) -> Optional[bool]:
+        """Whether a call that reaches it paused resumes it; false: only its own resume does, and such a call answers 409 sandbox_paused."""
+        return self.info.auto_wake
+
+    @property
+    def exit_code(self) -> Optional[int]:
+        """Its run's exit code, once its run ended; none for one a signal or its timeout ended."""
+        return self.info.exit_code
+
+    @property
+    def ended_at(self) -> Optional[str]:
+        """When its run ended."""
+        return self.info.ended_at
+
+    @property
+    def paused_at(self) -> Optional[str]:
+        """When its pause began (or its run ended), while it is paused."""
+        return self.info.paused_at
+
+    @property
+    def ready(self) -> Optional["MachineReady"]:
+        """A create's answer alone, for a start with a ready check: how its wait went."""
+        return self.info.ready
+
+    @property
+    def delete_at(self) -> Optional[str]:
+        """When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted."""
+        return self.info.delete_at
+
+    @property
+    def delete_protection(self) -> Optional[bool]:
+        """Whether its delete is refused (409 `delete_protected`) until an update turns this off."""
+        return self.info.delete_protection
+
     def __repr__(self) -> str:
         return f"Build({self.info!r})"
+
+    @classmethod
+    def create(cls, *, api_key: Optional[str] = None, base_url: Optional[str] = None, project: Optional[str] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, image: Optional[str] = None, secrets: Optional[List[str]] = None, start: Optional["MachineStart"] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, volumes: Optional[List["VolumeMount"]] = None, run: Optional["SandboxRun"] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, get_or_create: Optional[bool] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, from_: Optional[str] = None, snapshot: Optional[str] = None, network: Optional["NetworkRules"] = None, env: Optional[Dict[str, str]] = None, auto_wake: Optional[bool] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "Build":
+        """Makes one and returns it, as ``Runtime().builds.create()`` does, with a client of its own: ``RUNTIME_API_KEY``,
+        or ``api_key``. The other arguments are the create's."""
+        return Builds(Transport(api_key=api_key, base_url=base_url, project=project)).create(vcpu=vcpu, memory_gb=memory_gb, disk_gb=disk_gb, image=image, secrets=secrets, start=start, user=user, volumes=volumes, run=run, name=name, labels=labels, get_or_create=get_or_create, max_cost=max_cost, idle_pause_seconds=idle_pause_seconds, from_=from_, snapshot=snapshot, network=network, env=env, auto_wake=auto_wake, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
 
     def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "Build":
         """Returns a build."""
@@ -219,17 +346,17 @@ class Build:
         """Returns a build's CPU, memory, disks and pressure, as its host reads them from the build's own cgroup over a fifth of a second: never a call into the build, so it does not wake a paused one nor keep one from its idle pause. One that is not running has no reading."""
         return self._c.metrics(self.id, range=range)
 
-    def fork(self, *, count: Optional[int] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, secrets: Optional[List[str]] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, idempotency_key: Optional[str] = None) -> Forked:
+    def fork(self, *, count: Optional[int] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, secrets: Optional[List[str]] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Forked:
         """Copies a build as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies."""
-        return self._c.fork(self.id, count=count, name=name, labels=labels, secrets=secrets, max_cost=max_cost, idle_pause_seconds=idle_pause_seconds, idempotency_key=idempotency_key)
+        return self._c.fork(self.id, count=count, name=name, labels=labels, secrets=secrets, max_cost=max_cost, idle_pause_seconds=idle_pause_seconds, vcpu=vcpu, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
 
-    def snapshot(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, image: Optional[str] = None, start: Optional["MachineStart"] = None, idempotency_key: Optional[str] = None) -> Stored:
+    def snapshot(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, image: Optional[str] = None, start: Optional["MachineStart"] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Stored:
         """Keeps a build's memory and disk as they are now, a snapshot to start builds from; with `image`, its disk alone as that image's next version. The build runs on. Asked again with the same Idempotency-Key, it returns the same snapshot."""
-        return self._c.snapshot(self.id, name=name, labels=labels, image=image, start=start, idempotency_key=idempotency_key)
+        return self._c.snapshot(self.id, name=name, labels=labels, image=image, start=start, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
 
-    def update(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, env: Optional[Dict[str, str]] = None, remove_env: Optional[List[str]] = None, max_cost: Optional[str] = None, idempotency_key: Optional[str] = None) -> "Build":
-        """Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412."""
-        self.info = self._c.update(self.id, name=name, labels=labels, idle_pause_seconds=idle_pause_seconds, vcpu=vcpu, memory_gb=memory_gb, disk_gb=disk_gb, user=user, env=env, remove_env=remove_env, max_cost=max_cost, idempotency_key=idempotency_key)
+    def update(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, env: Optional[Dict[str, str]] = None, remove_env: Optional[List[str]] = None, max_cost: Optional[str] = None, auto_wake: Optional[bool] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "Build":
+        """Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused."""
+        self.info = self._c.update(self.id, name=name, labels=labels, idle_pause_seconds=idle_pause_seconds, vcpu=vcpu, memory_gb=memory_gb, disk_gb=disk_gb, user=user, env=env, remove_env=remove_env, max_cost=max_cost, auto_wake=auto_wake, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
         return self
 
     def screenshot(self, *, format: Optional[Literal["png", "jpeg", "unknown"]] = None, quality: Optional[int] = None) -> bytes:
@@ -244,6 +371,17 @@ class Build:
         """Runs a cell of Python in a build as a notebook does, in a Jupyter kernel it keeps running for the cell's `context`: variables, imports and functions stay for the next cell. Returns what it printed, its values and displays (text, HTML, images such as charts), and its exception with its traceback. The context's kernel starts on its first cell. A cell past `timeoutSeconds` is interrupted and its context kept. Refused 409 `kernel_not_installed` when the image has no ipykernel. A paused build is resumed first."""
         return self._c.run_code(self.id, language=language, context=context, timeout_seconds=timeout_seconds, code=code, idempotency_key=idempotency_key)
 
+    def spawn(self, cmd: Union[str, List[str]], *, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None, stdin: Optional[str] = None, timeout_seconds: Optional[float] = None, stream: Optional[bool] = None, stdin_open: Optional[bool] = None, output_encoding: Optional[Literal["utf8", "base64", "unknown"]] = None, pty: Optional["Terminal"] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, idempotency_key: Optional[str] = None) -> Process:
+        """Starts a command and returns its process at once, while the command runs on. Its output is read with `processes.output` and it is stopped with `processes.signal`."""
+        return self.exec(cmd, wait=False, cwd=cwd, env=env, stdin=stdin, timeout_seconds=timeout_seconds, stream=stream, stdin_open=stdin_open, output_encoding=output_encoding, pty=pty, user=user, idempotency_key=idempotency_key)
+
+    def __enter__(self) -> "Build":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        """Deletes it when the ``with`` block that holds it ends."""
+        self.delete()
+
 
 class Builds:
     """The machine an image's build runs on: Docker's own builder (BuildKit), its run `runtime-image-build`, deleted once its image is made. Made by an image's create, and billed as any machine is, for the CPU it uses and the memory it holds while it builds."""
@@ -251,9 +389,9 @@ class Builds:
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
 
-    def create(self, *, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, image: Optional[str] = None, secrets: Optional[List[str]] = None, start: Optional["MachineStart"] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, volumes: Optional[List["VolumeMount"]] = None, run: Optional["SandboxRun"] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, get_or_create: Optional[bool] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, snapshot: Optional[str] = None, network: Optional["NetworkRules"] = None, env: Optional[Dict[str, str]] = None, idempotency_key: Optional[str] = None) -> Build:
+    def create(self, *, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, image: Optional[str] = None, secrets: Optional[List[str]] = None, start: Optional["MachineStart"] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, volumes: Optional[List["VolumeMount"]] = None, run: Optional["SandboxRun"] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, get_or_create: Optional[bool] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, from_: Optional[str] = None, snapshot: Optional[str] = None, network: Optional["NetworkRules"] = None, env: Optional[Dict[str, str]] = None, auto_wake: Optional[bool] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Build:
         """Creates a build. Asked again with the same Idempotency-Key, it returns the same build."""
-        return Build(self, SandboxInfo.from_dict(self._transport.request("POST", f"/v2/builds", body=compact({"vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "image": image, "secrets": secrets, "start": start, "user": user, "volumes": volumes, "run": run, "name": name, "labels": labels, "getOrCreate": get_or_create, "maxCost": max_cost, "idlePauseSeconds": idle_pause_seconds, "snapshot": snapshot, "network": network, "env": env}), idempotency_key=idempotency_key, idempotent=True)))
+        return Build(self, SandboxInfo.from_dict(self._transport.request("POST", f"/v2/builds", body=compact({"vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "image": image, "secrets": secrets, "start": start, "user": user, "volumes": volumes, "run": run, "name": name, "labels": labels, "getOrCreate": get_or_create, "maxCost": max_cost, "idlePauseSeconds": idle_pause_seconds, "from": from_, "snapshot": snapshot, "network": network, "env": env, "autoWake": auto_wake, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True)))
 
     def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> Build:
         """Returns a build."""
@@ -298,6 +436,10 @@ class Builds:
     def signal_process(self, id: str, process: str, *, signal: Optional[Literal["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGKILL", "unknown"]] = None, idempotency_key: Optional[str] = None) -> Process:
         """Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe."""
         return Process.from_dict(self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}/processes/{quote(process, safe='')}:signal", body=compact({"signal": signal}), idempotency_key=idempotency_key, idempotent=True))
+
+    def resize_process(self, id: str, process: str, *, cols: int, rows: int, idempotency_key: Optional[str] = None) -> Process:
+        """Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe."""
+        return Process.from_dict(self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}/processes/{quote(process, safe='')}:resize", body=compact({"cols": cols, "rows": rows}), idempotency_key=idempotency_key, idempotent=True))
 
     def list_processes(self, id: str) -> ProcessList:
         """Lists a build's processes, newest first: those running and those that ended lately."""
@@ -367,17 +509,17 @@ class Builds:
         """Replaces where a build may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut."""
         return SandboxNetwork.from_dict(self._transport.request("PUT", f"/v2/builds/{quote(id, safe='')}/network", body=compact({"allowOutbound": allow_outbound, "denyOutbound": deny_outbound}), idempotency_key=idempotency_key))
 
-    def fork(self, id: str, *, count: Optional[int] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, secrets: Optional[List[str]] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, idempotency_key: Optional[str] = None) -> Forked:
+    def fork(self, id: str, *, count: Optional[int] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, secrets: Optional[List[str]] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Forked:
         """Copies a build as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies."""
-        return Forked.from_dict(self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:fork", body=compact({"count": count, "name": name, "labels": labels, "secrets": secrets, "maxCost": max_cost, "idlePauseSeconds": idle_pause_seconds}), idempotency_key=idempotency_key, idempotent=True))
+        return Forked.from_dict(self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:fork", body=compact({"count": count, "name": name, "labels": labels, "secrets": secrets, "maxCost": max_cost, "idlePauseSeconds": idle_pause_seconds, "vcpu": vcpu, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True))
 
-    def snapshot(self, id: str, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, image: Optional[str] = None, start: Optional["MachineStart"] = None, idempotency_key: Optional[str] = None) -> Stored:
+    def snapshot(self, id: str, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, image: Optional[str] = None, start: Optional["MachineStart"] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Stored:
         """Keeps a build's memory and disk as they are now, a snapshot to start builds from; with `image`, its disk alone as that image's next version. The build runs on. Asked again with the same Idempotency-Key, it returns the same snapshot."""
-        return Stored.from_dict(self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:snapshot", body=compact({"name": name, "labels": labels, "image": image, "start": start}), idempotency_key=idempotency_key, idempotent=True))
+        return Stored.from_dict(self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:snapshot", body=compact({"name": name, "labels": labels, "image": image, "start": start, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True))
 
-    def update(self, id: str, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, env: Optional[Dict[str, str]] = None, remove_env: Optional[List[str]] = None, max_cost: Optional[str] = None, idempotency_key: Optional[str] = None) -> SandboxInfo:
-        """Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412."""
-        return SandboxInfo.from_dict(self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:update", body=compact({"name": name, "labels": labels, "idlePauseSeconds": idle_pause_seconds, "vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "user": user, "env": env, "removeEnv": remove_env, "maxCost": max_cost}), idempotency_key=idempotency_key))
+    def update(self, id: str, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, env: Optional[Dict[str, str]] = None, remove_env: Optional[List[str]] = None, max_cost: Optional[str] = None, auto_wake: Optional[bool] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> SandboxInfo:
+        """Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused."""
+        return SandboxInfo.from_dict(self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:update", body=compact({"name": name, "labels": labels, "idlePauseSeconds": idle_pause_seconds, "vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "user": user, "env": env, "removeEnv": remove_env, "maxCost": max_cost, "autoWake": auto_wake, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key))
 
     def screenshot(self, id: str, *, format: Optional[Literal["png", "jpeg", "unknown"]] = None, quality: Optional[int] = None) -> bytes:
         """Returns what a build's screen shows now, as `image/png` (or `image/jpeg`): its X display `:1`, whole. Refused 409 `display_not_running` when no display runs. A paused build is resumed first."""
@@ -479,6 +621,10 @@ class AsyncBuildProcesses:
         """Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe."""
         return await self._c.signal_process(self._id, process, signal=signal, idempotency_key=idempotency_key)
 
+    async def resize(self, process: str, *, cols: int, rows: int, idempotency_key: Optional[str] = None) -> Process:
+        """Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe."""
+        return await self._c.resize_process(self._id, process, cols=cols, rows=rows, idempotency_key=idempotency_key)
+
     async def list(self) -> ProcessList:
         """Lists a build's processes, newest first: those running and those that ended lately."""
         return await self._c.list_processes(self._id)
@@ -516,8 +662,129 @@ class AsyncBuild:
         """Its id."""
         return self.info.id
 
+    @property
+    def vcpu(self) -> Optional[int]:
+        """Its vCPUs; its product's default when omitted."""
+        return self.info.vcpu
+
+    @property
+    def memory_gb(self) -> Optional[float]:
+        """Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted."""
+        return self.info.memory_gb
+
+    @property
+    def disk_gb(self) -> Optional[float]:
+        """Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger."""
+        return self.info.disk_gb
+
+    @property
+    def image(self) -> Optional[str]:
+        """The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted."""
+        return self.info.image
+
+    @property
+    def secrets(self) -> Optional[List[str]]:
+        """The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it."""
+        return self.info.secrets
+
+    @property
+    def start(self) -> Optional["MachineStart"]:
+        """The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted."""
+        return self.info.start
+
+    @property
+    def user(self) -> Optional[Literal["runtime", "root", "unknown"]]:
+        """Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`."""
+        return self.info.user
+
+    @property
+    def object(self) -> Literal["sandbox", "function", "app", "site", "ci", "browser", "desktop", "notebook", "workspace", "container", "build", "agent.session", "unknown"]:
+        """Its product's kind: `sandbox` for a sandbox, `app` for an app, and so on."""
+        return self.info.object
+
+    @property
+    def name(self) -> Optional[str]:
+        """Its name, unique in its project."""
+        return self.info.name
+
+    @property
+    def state(self) -> Literal["starting", "running", "paused", "deleted", "error", "unknown"]:
+        """Where it is."""
+        return self.info.state
+
+    @property
+    def labels(self) -> Dict[str, str]:
+        """Its labels."""
+        return self.info.labels
+
+    @property
+    def created_at(self) -> Optional[str]:
+        """When it was created."""
+        return self.info.created_at
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer alone."""
+        return self.info.deleted_at
+
+    @property
+    def revision(self) -> Optional[int]:
+        """Its revision, changed by every change to it: what an update's If-Match names."""
+        return self.info.revision
+
+    @property
+    def idle_pause_seconds(self) -> Optional[int]:
+        """Seconds with nothing happening before it pauses; 0 never."""
+        return self.info.idle_pause_seconds
+
+    @property
+    def max_cost(self) -> Optional[str]:
+        """The most it may cost in all, in US dollars; none when it has no such cap."""
+        return self.info.max_cost
+
+    @property
+    def auto_wake(self) -> Optional[bool]:
+        """Whether a call that reaches it paused resumes it; false: only its own resume does, and such a call answers 409 sandbox_paused."""
+        return self.info.auto_wake
+
+    @property
+    def exit_code(self) -> Optional[int]:
+        """Its run's exit code, once its run ended; none for one a signal or its timeout ended."""
+        return self.info.exit_code
+
+    @property
+    def ended_at(self) -> Optional[str]:
+        """When its run ended."""
+        return self.info.ended_at
+
+    @property
+    def paused_at(self) -> Optional[str]:
+        """When its pause began (or its run ended), while it is paused."""
+        return self.info.paused_at
+
+    @property
+    def ready(self) -> Optional["MachineReady"]:
+        """A create's answer alone, for a start with a ready check: how its wait went."""
+        return self.info.ready
+
+    @property
+    def delete_at(self) -> Optional[str]:
+        """When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted."""
+        return self.info.delete_at
+
+    @property
+    def delete_protection(self) -> Optional[bool]:
+        """Whether its delete is refused (409 `delete_protected`) until an update turns this off."""
+        return self.info.delete_protection
+
     def __repr__(self) -> str:
         return f"AsyncBuild({self.info!r})"
+
+    @classmethod
+    async def create(cls, *, api_key: Optional[str] = None, base_url: Optional[str] = None, project: Optional[str] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, image: Optional[str] = None, secrets: Optional[List[str]] = None, start: Optional["MachineStart"] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, volumes: Optional[List["VolumeMount"]] = None, run: Optional["SandboxRun"] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, get_or_create: Optional[bool] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, from_: Optional[str] = None, snapshot: Optional[str] = None, network: Optional["NetworkRules"] = None, env: Optional[Dict[str, str]] = None, auto_wake: Optional[bool] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "AsyncBuild":
+        """Makes one and returns it, as ``Runtime().builds.create()`` does, with a client of its own: ``RUNTIME_API_KEY``,
+        or ``api_key``. The other arguments are the create's."""
+        return await AsyncBuilds(AsyncTransport(api_key=api_key, base_url=base_url, project=project)).create(vcpu=vcpu, memory_gb=memory_gb, disk_gb=disk_gb, image=image, secrets=secrets, start=start, user=user, volumes=volumes, run=run, name=name, labels=labels, get_or_create=get_or_create, max_cost=max_cost, idle_pause_seconds=idle_pause_seconds, from_=from_, snapshot=snapshot, network=network, env=env, auto_wake=auto_wake, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
 
     async def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "AsyncBuild":
         """Returns a build."""
@@ -546,17 +813,17 @@ class AsyncBuild:
         """Returns a build's CPU, memory, disks and pressure, as its host reads them from the build's own cgroup over a fifth of a second: never a call into the build, so it does not wake a paused one nor keep one from its idle pause. One that is not running has no reading."""
         return await self._c.metrics(self.id, range=range)
 
-    async def fork(self, *, count: Optional[int] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, secrets: Optional[List[str]] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, idempotency_key: Optional[str] = None) -> Forked:
+    async def fork(self, *, count: Optional[int] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, secrets: Optional[List[str]] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Forked:
         """Copies a build as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies."""
-        return await self._c.fork(self.id, count=count, name=name, labels=labels, secrets=secrets, max_cost=max_cost, idle_pause_seconds=idle_pause_seconds, idempotency_key=idempotency_key)
+        return await self._c.fork(self.id, count=count, name=name, labels=labels, secrets=secrets, max_cost=max_cost, idle_pause_seconds=idle_pause_seconds, vcpu=vcpu, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
 
-    async def snapshot(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, image: Optional[str] = None, start: Optional["MachineStart"] = None, idempotency_key: Optional[str] = None) -> Stored:
+    async def snapshot(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, image: Optional[str] = None, start: Optional["MachineStart"] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Stored:
         """Keeps a build's memory and disk as they are now, a snapshot to start builds from; with `image`, its disk alone as that image's next version. The build runs on. Asked again with the same Idempotency-Key, it returns the same snapshot."""
-        return await self._c.snapshot(self.id, name=name, labels=labels, image=image, start=start, idempotency_key=idempotency_key)
+        return await self._c.snapshot(self.id, name=name, labels=labels, image=image, start=start, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
 
-    async def update(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, env: Optional[Dict[str, str]] = None, remove_env: Optional[List[str]] = None, max_cost: Optional[str] = None, idempotency_key: Optional[str] = None) -> "AsyncBuild":
-        """Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412."""
-        self.info = await self._c.update(self.id, name=name, labels=labels, idle_pause_seconds=idle_pause_seconds, vcpu=vcpu, memory_gb=memory_gb, disk_gb=disk_gb, user=user, env=env, remove_env=remove_env, max_cost=max_cost, idempotency_key=idempotency_key)
+    async def update(self, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, env: Optional[Dict[str, str]] = None, remove_env: Optional[List[str]] = None, max_cost: Optional[str] = None, auto_wake: Optional[bool] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "AsyncBuild":
+        """Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused."""
+        self.info = await self._c.update(self.id, name=name, labels=labels, idle_pause_seconds=idle_pause_seconds, vcpu=vcpu, memory_gb=memory_gb, disk_gb=disk_gb, user=user, env=env, remove_env=remove_env, max_cost=max_cost, auto_wake=auto_wake, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
         return self
 
     async def screenshot(self, *, format: Optional[Literal["png", "jpeg", "unknown"]] = None, quality: Optional[int] = None) -> bytes:
@@ -571,6 +838,17 @@ class AsyncBuild:
         """Runs a cell of Python in a build as a notebook does, in a Jupyter kernel it keeps running for the cell's `context`: variables, imports and functions stay for the next cell. Returns what it printed, its values and displays (text, HTML, images such as charts), and its exception with its traceback. The context's kernel starts on its first cell. A cell past `timeoutSeconds` is interrupted and its context kept. Refused 409 `kernel_not_installed` when the image has no ipykernel. A paused build is resumed first."""
         return await self._c.run_code(self.id, language=language, context=context, timeout_seconds=timeout_seconds, code=code, idempotency_key=idempotency_key)
 
+    async def spawn(self, cmd: Union[str, List[str]], *, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None, stdin: Optional[str] = None, timeout_seconds: Optional[float] = None, stream: Optional[bool] = None, stdin_open: Optional[bool] = None, output_encoding: Optional[Literal["utf8", "base64", "unknown"]] = None, pty: Optional["Terminal"] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, idempotency_key: Optional[str] = None) -> Process:
+        """Starts a command and returns its process at once, while the command runs on. Its output is read with `processes.output` and it is stopped with `processes.signal`."""
+        return await self.exec(cmd, wait=False, cwd=cwd, env=env, stdin=stdin, timeout_seconds=timeout_seconds, stream=stream, stdin_open=stdin_open, output_encoding=output_encoding, pty=pty, user=user, idempotency_key=idempotency_key)
+
+    async def __aenter__(self) -> "AsyncBuild":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        """Deletes it when the ``async with`` block that holds it ends."""
+        await self.delete()
+
 
 class AsyncBuilds:
     """The machine an image's build runs on: Docker's own builder (BuildKit), its run `runtime-image-build`, deleted once its image is made. Made by an image's create, and billed as any machine is, for the CPU it uses and the memory it holds while it builds."""
@@ -578,9 +856,9 @@ class AsyncBuilds:
     def __init__(self, transport: AsyncTransport) -> None:
         self._transport = transport
 
-    async def create(self, *, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, image: Optional[str] = None, secrets: Optional[List[str]] = None, start: Optional["MachineStart"] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, volumes: Optional[List["VolumeMount"]] = None, run: Optional["SandboxRun"] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, get_or_create: Optional[bool] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, snapshot: Optional[str] = None, network: Optional["NetworkRules"] = None, env: Optional[Dict[str, str]] = None, idempotency_key: Optional[str] = None) -> AsyncBuild:
+    async def create(self, *, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, image: Optional[str] = None, secrets: Optional[List[str]] = None, start: Optional["MachineStart"] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, volumes: Optional[List["VolumeMount"]] = None, run: Optional["SandboxRun"] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, get_or_create: Optional[bool] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, from_: Optional[str] = None, snapshot: Optional[str] = None, network: Optional["NetworkRules"] = None, env: Optional[Dict[str, str]] = None, auto_wake: Optional[bool] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> AsyncBuild:
         """Creates a build. Asked again with the same Idempotency-Key, it returns the same build."""
-        return AsyncBuild(self, SandboxInfo.from_dict(await self._transport.request("POST", f"/v2/builds", body=compact({"vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "image": image, "secrets": secrets, "start": start, "user": user, "volumes": volumes, "run": run, "name": name, "labels": labels, "getOrCreate": get_or_create, "maxCost": max_cost, "idlePauseSeconds": idle_pause_seconds, "snapshot": snapshot, "network": network, "env": env}), idempotency_key=idempotency_key, idempotent=True)))
+        return AsyncBuild(self, SandboxInfo.from_dict(await self._transport.request("POST", f"/v2/builds", body=compact({"vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "image": image, "secrets": secrets, "start": start, "user": user, "volumes": volumes, "run": run, "name": name, "labels": labels, "getOrCreate": get_or_create, "maxCost": max_cost, "idlePauseSeconds": idle_pause_seconds, "from": from_, "snapshot": snapshot, "network": network, "env": env, "autoWake": auto_wake, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True)))
 
     async def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> AsyncBuild:
         """Returns a build."""
@@ -625,6 +903,10 @@ class AsyncBuilds:
     async def signal_process(self, id: str, process: str, *, signal: Optional[Literal["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGKILL", "unknown"]] = None, idempotency_key: Optional[str] = None) -> Process:
         """Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe."""
         return Process.from_dict(await self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}/processes/{quote(process, safe='')}:signal", body=compact({"signal": signal}), idempotency_key=idempotency_key, idempotent=True))
+
+    async def resize_process(self, id: str, process: str, *, cols: int, rows: int, idempotency_key: Optional[str] = None) -> Process:
+        """Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe."""
+        return Process.from_dict(await self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}/processes/{quote(process, safe='')}:resize", body=compact({"cols": cols, "rows": rows}), idempotency_key=idempotency_key, idempotent=True))
 
     async def list_processes(self, id: str) -> ProcessList:
         """Lists a build's processes, newest first: those running and those that ended lately."""
@@ -694,17 +976,17 @@ class AsyncBuilds:
         """Replaces where a build may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut."""
         return SandboxNetwork.from_dict(await self._transport.request("PUT", f"/v2/builds/{quote(id, safe='')}/network", body=compact({"allowOutbound": allow_outbound, "denyOutbound": deny_outbound}), idempotency_key=idempotency_key))
 
-    async def fork(self, id: str, *, count: Optional[int] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, secrets: Optional[List[str]] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, idempotency_key: Optional[str] = None) -> Forked:
+    async def fork(self, id: str, *, count: Optional[int] = None, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, secrets: Optional[List[str]] = None, max_cost: Optional[str] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Forked:
         """Copies a build as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies."""
-        return Forked.from_dict(await self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:fork", body=compact({"count": count, "name": name, "labels": labels, "secrets": secrets, "maxCost": max_cost, "idlePauseSeconds": idle_pause_seconds}), idempotency_key=idempotency_key, idempotent=True))
+        return Forked.from_dict(await self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:fork", body=compact({"count": count, "name": name, "labels": labels, "secrets": secrets, "maxCost": max_cost, "idlePauseSeconds": idle_pause_seconds, "vcpu": vcpu, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True))
 
-    async def snapshot(self, id: str, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, image: Optional[str] = None, start: Optional["MachineStart"] = None, idempotency_key: Optional[str] = None) -> Stored:
+    async def snapshot(self, id: str, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, image: Optional[str] = None, start: Optional["MachineStart"] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Stored:
         """Keeps a build's memory and disk as they are now, a snapshot to start builds from; with `image`, its disk alone as that image's next version. The build runs on. Asked again with the same Idempotency-Key, it returns the same snapshot."""
-        return Stored.from_dict(await self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:snapshot", body=compact({"name": name, "labels": labels, "image": image, "start": start}), idempotency_key=idempotency_key, idempotent=True))
+        return Stored.from_dict(await self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:snapshot", body=compact({"name": name, "labels": labels, "image": image, "start": start, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True))
 
-    async def update(self, id: str, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, env: Optional[Dict[str, str]] = None, remove_env: Optional[List[str]] = None, max_cost: Optional[str] = None, idempotency_key: Optional[str] = None) -> SandboxInfo:
-        """Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412."""
-        return SandboxInfo.from_dict(await self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:update", body=compact({"name": name, "labels": labels, "idlePauseSeconds": idle_pause_seconds, "vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "user": user, "env": env, "removeEnv": remove_env, "maxCost": max_cost}), idempotency_key=idempotency_key))
+    async def update(self, id: str, *, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idle_pause_seconds: Optional[int] = None, vcpu: Optional[int] = None, memory_gb: Optional[float] = None, disk_gb: Optional[float] = None, user: Optional[Literal["runtime", "root", "unknown"]] = None, env: Optional[Dict[str, str]] = None, remove_env: Optional[List[str]] = None, max_cost: Optional[str] = None, auto_wake: Optional[bool] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> SandboxInfo:
+        """Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused."""
+        return SandboxInfo.from_dict(await self._transport.request("POST", f"/v2/builds/{quote(id, safe='')}:update", body=compact({"name": name, "labels": labels, "idlePauseSeconds": idle_pause_seconds, "vcpu": vcpu, "memoryGB": memory_gb, "diskGB": disk_gb, "user": user, "env": env, "removeEnv": remove_env, "maxCost": max_cost, "autoWake": auto_wake, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key))
 
     async def screenshot(self, id: str, *, format: Optional[Literal["png", "jpeg", "unknown"]] = None, quality: Optional[int] = None) -> bytes:
         """Returns what a build's screen shows now, as `image/png` (or `image/jpeg`): its X display `:1`, whole. Refused 409 `display_not_running` when no display runs. A paused build is resumed first."""

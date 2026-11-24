@@ -31,23 +31,23 @@ export type IdentityListQuery = {
 
 /** An agent or CI pipeline: who a key acts as besides a person, holding grants of its own. */
 export class Identities {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the organization's agents and CI pipelines, by name. */
-  list(query: IdentityListQuery = {}, options?: RequestOptions): Paginated<Identity> {
-    return new Paginated<Identity>((cursor) => this.#t.request<Page<Identity>>("GET", `/v2/identities`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: IdentityListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Identity> {
+    return new Paginated<Identity>((cursor) => this.transport.request<Page<Identity>>("GET", `/v2/identities`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 
   /** Renames an agent or CI pipeline; its keys and grants stay as they are. A name another of its kind has returns 409. */
   update(id: string, input: Rename, options?: RequestOptions): Promise<Identity> {
-    return this.#t.request<Identity>("POST", `/v2/identities/${encodeURIComponent(id)}:update`, { body: input, options, idempotent: true });
+    return this.transport.request<Identity>("POST", `/v2/identities/${encodeURIComponent(id)}:update`, { body: input, options, idempotent: true });
   }
 
   /** Deletes an agent or CI pipeline and frees its name, with its grants and keys: refused from their next call. The caller needs `grants:delete` as well, as the grants go with it. What it made stays. Deleted again, it returns 404. */
   delete(id: string, options?: RequestOptions): Promise<Identity> {
-    return this.#t.request<Identity>("DELETE", `/v2/identities/${encodeURIComponent(id)}`, { options, idempotent: true });
+    return this.transport.request<Identity>("DELETE", `/v2/identities/${encodeURIComponent(id)}`, { options, idempotent: true });
   }
 }

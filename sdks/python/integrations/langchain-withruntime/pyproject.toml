@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langchain-withruntime"
-version = "0.1.0"
+version = "0.1.1"
 description = "Runtime sandbox integration for Deep Agents"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -25,7 +25,7 @@ dependencies = [
     "deepagents>=0.7.0,<0.8.0",
     # 0.6.0 and earlier cut long command output at 100,000 characters by
     # default, which broke read_file on files past about 75 KB. 0.6.1 returns it whole.
-    "withruntime[deepagents]>=0.6.1",
+    "withruntime[deepagents]>=0.6.1,<1.0",
 ]
 
 [project.urls]

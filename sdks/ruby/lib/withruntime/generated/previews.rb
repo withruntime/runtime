@@ -5,120 +5,226 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # A preview of the sandbox its path names to create, or its visibility and sites to change.
-    # - +port+: The port inside the sandbox. At least 1. At most 65535.
-    # - +visibility+: `private` (default): a token is needed. `public`: anyone with the address.
-    # - +embed_origins+: The sites that may show it in an iframe; omitted on one that exists, kept as it is; empty for any site.
-    # - +ttl_seconds+: The token's lifetime in seconds, from 60 until the calling key's own end (a year at most); a day when omitted, or the key's end when that is sooner. At least 60. At most 31536000. Default: 86400.
-    PreviewCreate = Struct.new(:port, :visibility, :embed_origins, :ttl_seconds, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # A preview of the machine its path names to create, or its visibility and sites to change.
+  # - +port+: The port inside the machine. At least 1. At most 65535.
+  # - +visibility+: `private` (default): a token is needed. `public`: anyone with the address.
+  # - +embed_origins+: The sites that may show it in an iframe; omitted on one that exists, kept as it is; empty for any site.
+  # - +ttl_seconds+: The token's lifetime in seconds, from 60 until the calling key's own end (a year at most); a day when omitted, or the key's end when that is sooner. At least 60. At most 31536000. Default: 86400.
+  PreviewCreate = Struct.new(:port, :visibility, :embed_origins, :ttl_seconds, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          port: h["port"],
-          visibility: h["visibility"],
-          embed_origins: h["embedOrigins"],
-          ttl_seconds: h["ttlSeconds"],
-        )
-      end
-
-      def to_wire
-        {
-          "port" => self.port,
-          "visibility" => self.visibility,
-          "embedOrigins" => self.embed_origins,
-          "ttlSeconds" => self.ttl_seconds,
-        }.compact
-      end
+      new(
+        port: h["port"],
+        visibility: h["visibility"],
+        embed_origins: h["embedOrigins"],
+        ttl_seconds: h["ttlSeconds"],
+      )
     end
 
-    # A preview.
-    # - +id+: Its ID.
-    # - +object+: Always `preview`.
-    # - +sandbox_id+: The sandbox whose port it shares.
-    # - +port+: The port inside the sandbox.
-    # - +visibility+: `private` or `public`.
-    # - +url+: Its address. A private one also needs the token.
-    # - +state+: Where it is: `ready` once every serving host routes it.
-    # - +token+: A token signed for this answer, for a private preview and a key that may create one: send it in the `x-runtime-preview-token` header, or open the url with `?runtime_preview_token=<token>` in a browser.
-    # - +token_expires_at+: When this answer's token stops working.
-    # - +embed_origins+: The sites that may show it in an iframe; none for any site.
-    # - +created_at+: When it was created.
-    # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
-    Preview = Struct.new(:id, :object, :sandbox_id, :port, :visibility, :url, :state, :token, :token_expires_at, :embed_origins, :created_at, :deleted_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "port" => self.port,
+        "visibility" => self.visibility,
+        "embedOrigins" => self.embed_origins,
+        "ttlSeconds" => self.ttl_seconds,
+      }.compact
+    end
+  end
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          sandbox_id: h["sandboxId"],
-          port: h["port"],
-          visibility: h["visibility"],
-          url: h["url"],
-          state: h["state"],
-          token: h["token"],
-          token_expires_at: h["tokenExpiresAt"],
-          embed_origins: h["embedOrigins"],
-          created_at: h["createdAt"],
-          deleted_at: h["deletedAt"],
-        )
-      end
+  # A preview.
+  # - +id+: Its ID.
+  # - +name+: Its hostname, `<port>-<sandbox hex>.<domain>`: its own calls (`/v2/previews/{name}`) take it or its ID.
+  # - +object+: Always `preview`.
+  # - +sandbox_id+: The machine whose port it shares.
+  # - +port+: The port inside the machine.
+  # - +visibility+: `private` or `public`.
+  # - +url+: Its address. A private one also needs the token.
+  # - +state+: Where it is: `ready` once every serving host routes it.
+  # - +token+: A token signed for this answer, for a private preview and a key that may create one: send it in the `x-runtime-preview-token` header, or open the url with `?runtime_preview_token=<token>` in a browser.
+  # - +token_expires_at+: When this answer's token stops working.
+  # - +embed_origins+: The sites that may show it in an iframe; none for any site.
+  # - +created_at+: When it was created.
+  # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
+  PreviewInfo = Struct.new(:id, :name, :object, :sandbox_id, :port, :visibility, :url, :state, :token, :token_expires_at, :embed_origins, :created_at, :deleted_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "sandboxId" => self.sandbox_id,
-          "port" => self.port,
-          "visibility" => self.visibility,
-          "url" => self.url,
-          "state" => self.state,
-          "token" => self.token,
-          "tokenExpiresAt" => self.token_expires_at,
-          "embedOrigins" => self.embed_origins,
-          "createdAt" => self.created_at,
-          "deletedAt" => self.deleted_at,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        name: h["name"],
+        object: h["object"],
+        sandbox_id: h["sandboxId"],
+        port: h["port"],
+        visibility: h["visibility"],
+        url: h["url"],
+        state: h["state"],
+        token: h["token"],
+        token_expires_at: h["tokenExpiresAt"],
+        embed_origins: h["embedOrigins"],
+        created_at: h["createdAt"],
+        deleted_at: h["deletedAt"],
+      )
     end
 
-    # A port of a sandbox at a public HTTPS address: private with a signed token, or public.
-    class Previews
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "id" => self.id,
+        "name" => self.name,
+        "object" => self.object,
+        "sandboxId" => self.sandbox_id,
+        "port" => self.port,
+        "visibility" => self.visibility,
+        "url" => self.url,
+        "state" => self.state,
+        "token" => self.token,
+        "tokenExpiresAt" => self.token_expires_at,
+        "embedOrigins" => self.embed_origins,
+        "createdAt" => self.created_at,
+        "deletedAt" => self.deleted_at,
+      }.compact
+    end
+  end
 
-      # Shares a port of a sandbox at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview.
-      def create(id, port:, visibility: nil, embed_origins: nil, ttl_seconds: nil, idempotency_key: nil)
-        Preview.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/previews", body: { "port" => port, "visibility" => visibility, "embedOrigins" => embed_origins, "ttlSeconds" => ttl_seconds }.compact, idempotency_key: idempotency_key))
-      end
+  # One of previews: A port of a machine at a public HTTPS address: private with a signed token, or public.
+  class Preview
+    # What it was when last read, and what is under it.
+    attr_reader :info
 
-      # Lists a sandbox's previews, lowest port first.
-      def list(sandbox_id:, cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/previews", query: { "sandboxId" => sandbox_id, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Preview.from(i) }
-      end
+    def initialize(client, info)
+      @c = client
+      @info = info
+    end
 
-      # Returns a preview; `sign` returns one with a token.
-      def get(name)
-        Preview.from(@transport.request("GET", "/v2/previews/#{URI.encode_www_form_component(name)}", idempotent: true))
-      end
+    # Its name.
+    def name
+      @info.name
+    end
 
-      # Returns a private preview with a new token; tokens signed before keep their own expiry.
-      def sign(name, ttl_seconds: nil, idempotency_key: nil)
-        Preview.from(@transport.request("POST", "/v2/previews/#{URI.encode_www_form_component(name)}:sign", query: { "ttlSeconds" => ttl_seconds }, idempotency_key: idempotency_key))
-      end
+    # Its id.
+    def id
+      @info.id
+    end
 
-      # Refuses every token signed for a preview so far, and returns a new one.
-      def rotate(name, idempotency_key: nil)
-        Preview.from(@transport.request("POST", "/v2/previews/#{URI.encode_www_form_component(name)}:rotate", idempotency_key: idempotency_key))
-      end
+    # Always `preview`.
+    def object
+      @info.object
+    end
 
-      # Stops sharing a port.
-      def delete(name, idempotency_key: nil)
-        Preview.from(@transport.request("DELETE", "/v2/previews/#{URI.encode_www_form_component(name)}", idempotency_key: idempotency_key))
-      end
+    # The machine whose port it shares.
+    def sandbox_id
+      @info.sandbox_id
+    end
+
+    # The port inside the machine.
+    def port
+      @info.port
+    end
+
+    # `private` or `public`.
+    def visibility
+      @info.visibility
+    end
+
+    # Its address. A private one also needs the token.
+    def url
+      @info.url
+    end
+
+    # Where it is: `ready` once every serving host routes it.
+    def state
+      @info.state
+    end
+
+    # A token signed for this answer, for a private preview and a key that may create one: send it in the `x-runtime-preview-token` header, or open the url with `?runtime_preview_token=<token>` in a browser.
+    def token
+      @info.token
+    end
+
+    # When this answer's token stops working.
+    def token_expires_at
+      @info.token_expires_at
+    end
+
+    # The sites that may show it in an iframe; none for any site.
+    def embed_origins
+      @info.embed_origins
+    end
+
+    # When it was created.
+    def created_at
+      @info.created_at
+    end
+
+    # When it was deleted: a delete's answer, its state `deleted`.
+    def deleted_at
+      @info.deleted_at
+    end
+
+    def inspect
+      "#<Preview #{@info.inspect}>"
+    end
+
+    # Returns a preview; `sign` returns one with a token.
+    def refresh(wait: nil, if_state: nil)
+      @info = @c.get(@info.name, wait: wait, if_state: if_state).info
+      self
+    end
+
+    # Returns a private preview with a new token; tokens signed before keep their own expiry.
+    def sign(ttl_seconds: nil, idempotency_key: nil)
+      @info = @c.sign(@info.name, ttl_seconds: ttl_seconds, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Refuses every token signed for a preview so far, and returns a new one.
+    def rotate(idempotency_key: nil)
+      @info = @c.rotate(@info.name, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Stops sharing a port.
+    def delete(idempotency_key: nil)
+      @c.delete(@info.name, idempotency_key: idempotency_key)
+    end
+  end
+
+  # A port of a machine at a public HTTPS address: private with a signed token, or public.
+  class Previews
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Shares a port of a machine at an HTTPS address and returns its url and, for a private one, a token; or changes its visibility and sites when it is shared. Asked again, the same preview.
+    def create(id, port:, visibility: nil, embed_origins: nil, ttl_seconds: nil, idempotency_key: nil)
+      Preview.new(self, PreviewInfo.from(@transport.request("POST", "/v2/sandboxes/#{URI.encode_www_form_component(id)}/previews", body: { "port" => port, "visibility" => visibility, "embedOrigins" => embed_origins, "ttlSeconds" => ttl_seconds }.compact, idempotency_key: idempotency_key)))
+    end
+
+    # Lists a machine's previews, lowest port first.
+    def list(sandbox_id:, cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/previews", query: { "sandboxId" => sandbox_id, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| PreviewInfo.from(i) }
+    end
+
+    # Returns a preview; `sign` returns one with a token.
+    def get(name, wait: nil, if_state: nil)
+      Preview.new(self, PreviewInfo.from(@transport.request("GET", "/v2/previews/#{URI.encode_www_form_component(name)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true)))
+    end
+
+    # Returns a private preview with a new token; tokens signed before keep their own expiry.
+    def sign(name, ttl_seconds: nil, idempotency_key: nil)
+      PreviewInfo.from(@transport.request("POST", "/v2/previews/#{URI.encode_www_form_component(name)}:sign", query: { "ttlSeconds" => ttl_seconds }, idempotency_key: idempotency_key))
+    end
+
+    # Refuses every token signed for a preview so far, and returns a new one.
+    def rotate(name, idempotency_key: nil)
+      PreviewInfo.from(@transport.request("POST", "/v2/previews/#{URI.encode_www_form_component(name)}:rotate", idempotency_key: idempotency_key))
+    end
+
+    # Stops sharing a port.
+    def delete(name, idempotency_key: nil)
+      PreviewInfo.from(@transport.request("DELETE", "/v2/previews/#{URI.encode_www_form_component(name)}", idempotency_key: idempotency_key))
     end
   end
 end

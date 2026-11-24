@@ -47,7 +47,7 @@ public final class MeClient {
     /** What a call that names no resource reaches: `org` (the whole organization) or `project` (the key's project alone). */
     public String scope;
 
-    /** How the organization pays: `test` (no card yet: every call is answered, and nothing runs or is billed), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted). */
+    /** How the organization pays: `test` (no card yet: every call that creates or changes a machine, volume or address answers 402 `card_required`), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted). */
     public String billing;
 
     public Me object(String v) {

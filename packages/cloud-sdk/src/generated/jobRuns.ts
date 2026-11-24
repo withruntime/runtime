@@ -55,6 +55,14 @@ export type JobRunListQuery = {
   limit?: number;
 };
 
+/** What get takes in its query. */
+export type JobRunGetQuery = {
+  /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+  wait?: number;
+  /** The state the caller last read, which `wait` waits for it to leave. */
+  ifState?: string;
+};
+
 /** What output takes in its query. */
 export type JobRunOutputQuery = {
   /** Output after this byte. At least 0. Default: 0. */
@@ -65,23 +73,23 @@ export type JobRunOutputQuery = {
 
 /** One run of a job: a machine made at one of its times, deleted when its command ends. Its record (exit code, times, the last 256 KiB of its output) stays readable for 7 days after. */
 export class JobRuns {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists a job's runs, oldest first unless `order` is `newest`, deleted ones included while their records are kept. */
-  list(query: JobRunListQuery, options?: RequestOptions): Paginated<JobRun> {
-    return new Paginated<JobRun>((cursor) => this.#t.request<Page<JobRun>>("GET", `/v2/job-runs`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: JobRunListQuery & RequestOptions, options?: RequestOptions): Paginated<JobRun> {
+    return new Paginated<JobRun>((cursor) => this.transport.request<Page<JobRun>>("GET", `/v2/job-runs`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 
   /** Returns a run. */
-  get(id: string, options?: RequestOptions): Promise<JobRun> {
-    return this.#t.request<JobRun>("GET", `/v2/job-runs/${encodeURIComponent(id)}`, { options, idempotent: true });
+  get(id: string, query: JobRunGetQuery & RequestOptions = {}, options?: RequestOptions): Promise<JobRun> {
+    return this.transport.request<JobRun>("GET", `/v2/job-runs/${encodeURIComponent(id)}`, { query: { ...query }, options, idempotent: true });
   }
 
   /** Returns a run's output after a cursor, stdout and stderr together in the order written, and the cursor to read on from. Its last 256 KiB are kept; truncated says when the cursor fell before them. */
-  output(id: string, query: JobRunOutputQuery = {}, options?: RequestOptions): Promise<JobRunOutput> {
-    return this.#t.request<JobRunOutput>("GET", `/v2/job-runs/${encodeURIComponent(id)}/output`, { query: { ...query }, options, idempotent: true });
+  output(id: string, query: JobRunOutputQuery & RequestOptions = {}, options?: RequestOptions): Promise<JobRunOutput> {
+    return this.transport.request<JobRunOutput>("GET", `/v2/job-runs/${encodeURIComponent(id)}/output`, { query: { ...query }, options, idempotent: true });
   }
 }

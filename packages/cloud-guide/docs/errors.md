@@ -8,7 +8,7 @@ Every error has the same fields: `code`, `message`, `requestId`, `hint`, `retrya
 { "error": { "code": "not_found", "message": "No such sandbox.", "requestId": "req_1d0b14e4db018fed" } }
 ```
 
-A command that fails inside a sandbox is not an error: [`POST /v2/sandboxes/{id}:exec`](./reference/sandboxes#exec) returns its result with a non-zero `exitCode`.
+A command that fails inside a machine is not an error: [`POST /v2/sandboxes/{id}:exec`](./reference/sandboxes#exec) returns its result with a non-zero `exitCode`.
 
 ## What the SDKs retry
 
@@ -34,6 +34,6 @@ The SDKs send the `Runtime-Version` header with 2026-10-27, the version of the A
 
 Paste this into your coding agent:
 
-> Read https://withruntime.com/docs/errors.md. Make this project's Runtime calls branch on the error's code, never its message, send an Idempotency-Key with every create so a retry never makes a second sandbox, and log the requestId of every error.
+> Read https://withruntime.com/docs/errors.md. Make this project's Runtime calls branch on the error's code, never its message, send an Idempotency-Key with every create so a retry never makes a second machine, and log the requestId of every error.
 >
 > This page as Markdown: https://withruntime.com/docs/errors.md

@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** A project: where sandboxes, storage, addresses and keys sit, each in one. Every organization has a default project, where a call that names none acts. */
+/** A project: where machines, storage, addresses and keys sit, each in one. Every organization has a default project, where a call that names none acts. */
 public final class Projects {
   private final Transport t;
 
@@ -15,7 +15,71 @@ public final class Projects {
     this.t = t;
   }
 
-  /** A project: where sandboxes, storage, addresses and keys sit. */
+  /** A project's own limits: each of its organization's plan limits set lower for it alone, never higher, by the price card's names and in its units. A start in it is held to both. One not set is its organization's. */
+  public static final class ProjectLimits {
+    /** The most vCPUs its machines run at once. At least 0. */
+    public Long runningVcpu;
+
+    /** The most memory its machines hold at once, in GiB. At least 0. */
+    public Long runningMemoryGib;
+
+    /** The most vCPUs one of its machines has. At least 0. */
+    public Long machineVcpu;
+
+    /** The most memory one of its machines has, in GiB. At least 0. */
+    public Long machineMemoryGib;
+
+    /** The most machines it starts a second. At least 0. */
+    public Long newMachinesPerSecond;
+
+    public ProjectLimits runningVcpu(Long v) {
+      this.runningVcpu = v;
+      return this;
+    }
+
+    public ProjectLimits runningMemoryGib(Long v) {
+      this.runningMemoryGib = v;
+      return this;
+    }
+
+    public ProjectLimits machineVcpu(Long v) {
+      this.machineVcpu = v;
+      return this;
+    }
+
+    public ProjectLimits machineMemoryGib(Long v) {
+      this.machineMemoryGib = v;
+      return this;
+    }
+
+    public ProjectLimits newMachinesPerSecond(Long v) {
+      this.newMachinesPerSecond = v;
+      return this;
+    }
+
+    static ProjectLimits of(Object raw) {
+      Map<String, Object> m = KitJson.object(raw);
+      ProjectLimits o = new ProjectLimits();
+      o.runningVcpu = KitJson.asLong(m.get("runningVcpu"));
+      o.runningMemoryGib = KitJson.asLong(m.get("runningMemoryGib"));
+      o.machineVcpu = KitJson.asLong(m.get("machineVcpu"));
+      o.machineMemoryGib = KitJson.asLong(m.get("machineMemoryGib"));
+      o.newMachinesPerSecond = KitJson.asLong(m.get("newMachinesPerSecond"));
+      return o;
+    }
+
+    Map<String, Object> toMap() {
+      Map<String, Object> m = new LinkedHashMap<>();
+      if (runningVcpu != null) m.put("runningVcpu", runningVcpu);
+      if (runningMemoryGib != null) m.put("runningMemoryGib", runningMemoryGib);
+      if (machineVcpu != null) m.put("machineVcpu", machineVcpu);
+      if (machineMemoryGib != null) m.put("machineMemoryGib", machineMemoryGib);
+      if (newMachinesPerSecond != null) m.put("newMachinesPerSecond", newMachinesPerSecond);
+      return m;
+    }
+  }
+
+  /** A project: where machines, storage, addresses and keys sit. */
   public static final class Project {
     /** Its ID. */
     public String id;
@@ -37,6 +101,9 @@ public final class Projects {
 
     /** When it was deleted: a delete's answer, its state `deleted`. */
     public String deletedAt;
+
+    /** Its own limits: those of its organization's plan limits set lower for it. One not set is its organization's. */
+    public ProjectLimits limits;
 
     public Project id(String v) {
       this.id = v;
@@ -73,6 +140,11 @@ public final class Projects {
       return this;
     }
 
+    public Project limits(ProjectLimits v) {
+      this.limits = v;
+      return this;
+    }
+
     static Project of(Object raw) {
       Map<String, Object> m = KitJson.object(raw);
       Project o = new Project();
@@ -83,6 +155,7 @@ public final class Projects {
       o.createdAt = KitJson.asString(m.get("createdAt"));
       o.state = KitJson.asString(m.get("state"));
       o.deletedAt = KitJson.asString(m.get("deletedAt"));
+      o.limits = (m.get("limits") == null ? null : ProjectLimits.of(m.get("limits")));
       return o;
     }
 
@@ -95,6 +168,7 @@ public final class Projects {
       if (createdAt != null) m.put("createdAt", createdAt);
       if (state != null) m.put("state", state);
       if (deletedAt != null) m.put("deletedAt", deletedAt);
+      if (limits != null) m.put("limits", limits.toMap());
       return m;
     }
   }
@@ -104,8 +178,16 @@ public final class Projects {
     /** Its name, unique in the organization. At least 1 character. At most 64 characters. */
     public String name;
 
+    /** Its own limits ([`ProjectLimits`]); none, its organization's. */
+    public ProjectLimits limits;
+
     public ProjectCreate name(String v) {
       this.name = v;
+      return this;
+    }
+
+    public ProjectCreate limits(ProjectLimits v) {
+      this.limits = v;
       return this;
     }
 
@@ -113,12 +195,38 @@ public final class Projects {
       Map<String, Object> m = KitJson.object(raw);
       ProjectCreate o = new ProjectCreate();
       o.name = KitJson.asString(m.get("name"));
+      o.limits = (m.get("limits") == null ? null : ProjectLimits.of(m.get("limits")));
       return o;
     }
 
     Map<String, Object> toMap() {
       Map<String, Object> m = new LinkedHashMap<>();
       if (name != null) m.put("name", name);
+      if (limits != null) m.put("limits", limits.toMap());
+      return m;
+    }
+  }
+
+  /** A project's own limits, set. */
+  public static final class ProjectLimitsSet {
+    /** Its limits, the whole set: each one given is set, each one left out is its organization's again. */
+    public ProjectLimits limits;
+
+    public ProjectLimitsSet limits(ProjectLimits v) {
+      this.limits = v;
+      return this;
+    }
+
+    static ProjectLimitsSet of(Object raw) {
+      Map<String, Object> m = KitJson.object(raw);
+      ProjectLimitsSet o = new ProjectLimitsSet();
+      o.limits = (m.get("limits") == null ? null : ProjectLimits.of(m.get("limits")));
+      return o;
+    }
+
+    Map<String, Object> toMap() {
+      Map<String, Object> m = new LinkedHashMap<>();
+      if (limits != null) m.put("limits", limits.toMap());
       return m;
     }
   }
@@ -178,9 +286,14 @@ public final class Projects {
     return Page.of(t.request("GET", "/v2/projects", query == null ? null : query.query(), null, new Transport.Call(true, null), opts), Project::of);
   }
 
-  /** Creates a project. A name another project has returns 409. Asked again with the same Idempotency-Key, it returns the same one. */
+  /** Creates a project, with its own limits when given. A name another project has returns 409; a limit above its organization's returns 400 `limit_above_org`. Asked again with the same Idempotency-Key, it returns the same one. */
   public Project create(ProjectCreate input, Transport.RequestOptions opts) {
     return Project.of(t.request("POST", "/v2/projects", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
+  }
+
+  /** Sets a project's own limits: each of its organization's plan limits set lower for it alone, by the price card's names. The whole set: a limit left out is its organization's again. One above its organization's returns 400 `limit_above_org`, naming the limit and both figures. Each start in the project is held to its limits and its organization's. */
+  public Project limits(String id, ProjectLimitsSet input, Transport.RequestOptions opts) {
+    return Project.of(t.request("POST", "/v2/projects/" + Transport.path(id) + ":limits", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
   /** Renames a project; what is in it stays as it is. A name another project has returns 409. */
@@ -188,7 +301,7 @@ public final class Projects {
     return Project.of(t.request("POST", "/v2/projects/" + Transport.path(id) + ":update", null, input == null ? null : input.toMap(), new Transport.Call(true, null), opts));
   }
 
-  /** Deletes a project and frees its name, with the grants, keys and invitations held to it. The caller needs `grants:delete` as well, as the grants go with it. The default project, or one that still holds a sandbox, storage or an address, returns 409. Deleted again, it returns 404. */
+  /** Deletes a project and frees its name, with the grants, keys and invitations held to it. The caller needs `grants:delete` as well, as the grants go with it. The default project, or one that still holds a machine, storage or an address, returns 409. Deleted again, it returns 404. */
   public Project delete(String id, Transport.RequestOptions opts) {
     return Project.of(t.request("DELETE", "/v2/projects/" + Transport.path(id), null, null, new Transport.Call(true, null), opts));
   }

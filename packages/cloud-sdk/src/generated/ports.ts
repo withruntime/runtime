@@ -6,19 +6,19 @@ import { Paginated } from "./runtime.js";
 
 /** A public TCP port to open. */
 export interface PortCreate {
-  /** The sandbox to carry to. */
+  /** The machine to carry to. */
   sandboxId: string;
-  /** The port inside the sandbox, 1 to 65535. */
+  /** The port inside the machine, 1 to 65535. */
   port: number;
 }
 
 /** A public TCP port's settings, as it keeps them. */
 export interface PortSettings {
-  /** The port inside the sandbox. At least 1. At most 65535. */
+  /** The port inside the machine. At least 1. At most 65535. */
   port: number;
 }
 
-/** A public TCP port: raw TCP from a public address and port to a port of a sandbox. */
+/** A public TCP port: raw TCP from a public address and port to a port of a machine. */
 export interface Port extends PortSettings {
   /** Its ID. */
   id: string;
@@ -30,7 +30,7 @@ export interface Port extends PortSettings {
   address: string;
   /** The public port to connect to. */
   publicPort: number;
-  /** The sandbox it carries to. */
+  /** The machine it carries to. */
   sandboxId: string;
   /** Its state: `ready` once every edge carries it. */
   state: "making" | "ready" | "deleted" | (string & {});
@@ -44,31 +44,31 @@ export interface Port extends PortSettings {
 
 /** What list takes in its query. */
 export type PortListQuery = {
-  /** Only this sandbox's ports. */
+  /** Only this machine's ports. */
   sandboxId?: string;
   /** The most items the page holds. At least 1. At most 200. Default: 50. */
   limit?: number;
 };
 
-/** A public TCP port carried to a port of a sandbox: a database, a game server, anything that is not HTTP. */
+/** A public TCP port carried to a port of a machine: a database, a game server, anything that is not HTTP. */
 export class Ports {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
-  /** Opens a public TCP port to a port of a sandbox: raw TCP, carried as it is. The public port is assigned from a pool of 10,000; returns 409 when every one is in use. Asked again for the same sandbox and port, it returns the same public port. */
+  /** Opens a public TCP port to a port of a machine: raw TCP, carried as it is. The public port is assigned from a pool of 10,000; returns 409 when every one is in use. Asked again for the same machine and port, it returns the same public port. */
   create(input: PortCreate, options?: RequestOptions): Promise<Port> {
-    return this.#t.request<Port>("POST", `/v2/ports`, { body: input, options, idempotent: true });
+    return this.transport.request<Port>("POST", `/v2/ports`, { body: input, options, idempotent: true });
   }
 
-  /** Lists the org's public TCP ports, or one sandbox's, by `connect`. */
-  list(query: PortListQuery = {}, options?: RequestOptions): Paginated<Port> {
-    return new Paginated<Port>((cursor) => this.#t.request<Page<Port>>("GET", `/v2/ports`, { query: { ...query, cursor }, options, idempotent: true }));
+  /** Lists the org's public TCP ports, or one machine's, by `connect`. */
+  list(query: PortListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Port> {
+    return new Paginated<Port>((cursor) => this.transport.request<Page<Port>>("GET", `/v2/ports`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 
   /** Closes a public TCP port and the connections through it. */
   delete(id: string, options?: RequestOptions): Promise<Port> {
-    return this.#t.request<Port>("DELETE", `/v2/ports/${encodeURIComponent(id)}`, { options, idempotent: true });
+    return this.transport.request<Port>("DELETE", `/v2/ports/${encodeURIComponent(id)}`, { options, idempotent: true });
   }
 }

@@ -12,6 +12,7 @@ from urllib.parse import quote
 from ._runtime import (AsyncPage, AsyncStream, AsyncTransport, Page, Stream, Transport, async_page, compact, open_enum, page,
                        to_bytes)
 from .sandboxes import Stored
+from .snapshots import StoredUpdate
 
 
 @dataclass
@@ -24,6 +25,10 @@ class VolumeCreate:
     name: Optional[str] = None
     #: Labels to find it by.
     labels: Optional[Dict[str, str]] = None
+    #: Seconds until Runtime deletes it and what it holds, as its delete does: final, and it can't be undone; one attached to a machine is deleted once that machine ends. 0 or omitted: kept until deleted. At least 0. At most 315360000.
+    delete_after_seconds: Optional[int] = None
+    #: Whether its delete is refused (409 `delete_protected`) until an update turns this off; false when omitted. Not with `deleteAfterSeconds`.
+    delete_protection: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "VolumeCreate":
@@ -31,6 +36,8 @@ class VolumeCreate:
             size_mib=d["sizeMiB"],
             name=d.get("name"),
             labels=d.get("labels"),
+            delete_after_seconds=d.get("deleteAfterSeconds"),
+            delete_protection=d.get("deleteProtection"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -38,7 +45,133 @@ class VolumeCreate:
             "sizeMiB": self.size_mib,
             "name": self.name,
             "labels": self.labels,
+            "deleteAfterSeconds": self.delete_after_seconds,
+            "deleteProtection": self.delete_protection,
         })
+
+
+class Volume:
+    """One of volumes: A disk that outlives the machines it is attached to."""
+
+    def __init__(self, client: "Volumes", info: Stored) -> None:
+        self._c = client
+        #: What it was when last read.
+        self.info = info
+
+    @property
+    def id(self) -> str:
+        """Its id."""
+        return self.info.id
+
+    @property
+    def object(self) -> Literal["snapshot", "image", "volume", "unknown"]:
+        """Its kind: `snapshot`, `image` or `volume`."""
+        return self.info.object
+
+    @property
+    def name(self) -> Optional[str]:
+        """Its name, unique in its project among its kind."""
+        return self.info.name
+
+    @property
+    def state(self) -> Literal["making", "ready", "failed", "deleted", "unknown"]:
+        """Where it is."""
+        return self.info.state
+
+    @property
+    def labels(self) -> Dict[str, str]:
+        """Its labels."""
+        return self.info.labels
+
+    @property
+    def size_bytes(self) -> int:
+        """What it was made to hold, in bytes."""
+        return self.info.size_bytes
+
+    @property
+    def stored_bytes(self) -> int:
+        """What it holds now, in bytes."""
+        return self.info.stored_bytes
+
+    @property
+    def parent_id(self) -> Optional[str]:
+        """What it was made from (a snapshot's machine, an image's base), if anything."""
+        return self.info.parent_id
+
+    @property
+    def attached_to(self) -> Optional[str]:
+        """The machine it is attached to now, if any."""
+        return self.info.attached_to
+
+    @property
+    def created_at(self) -> Optional[str]:
+        """When it was made."""
+        return self.info.created_at
+
+    @property
+    def version(self) -> Optional[int]:
+        """An image's version of its name: each build or keep of a name is its next."""
+        return self.info.version
+
+    @property
+    def tags(self) -> Optional[List[str]]:
+        """An image's tags, each `name:tag`."""
+        return self.info.tags
+
+    @property
+    def error(self) -> Optional[str]:
+        """Why an image's build failed."""
+        return self.info.error
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer, its state `deleted`."""
+        return self.info.deleted_at
+
+    @property
+    def delete_at(self) -> Optional[str]:
+        """When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted."""
+        return self.info.delete_at
+
+    @property
+    def delete_waits_for(self) -> Optional[str]:
+        """Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does."""
+        return self.info.delete_waits_for
+
+    @property
+    def delete_protection(self) -> Optional[bool]:
+        """Whether its delete is refused (409 `delete_protected`) until an update turns this off."""
+        return self.info.delete_protection
+
+    def __repr__(self) -> str:
+        return f"Volume({self.info!r})"
+
+    @classmethod
+    def create(cls, *, api_key: Optional[str] = None, base_url: Optional[str] = None, project: Optional[str] = None, size_mib: int, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "Volume":
+        """Makes one and returns it, as ``Runtime().volumes.create()`` does, with a client of its own: ``RUNTIME_API_KEY``,
+        or ``api_key``. The other arguments are the create's."""
+        return Volumes(Transport(api_key=api_key, base_url=base_url, project=project)).create(size_mib=size_mib, name=name, labels=labels, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
+
+    def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "Volume":
+        """Returns a volume."""
+        self.info = (self._c.get(self.id, wait=wait, if_state=if_state)).info
+        return self
+
+    def delete(self, *, idempotency_key: Optional[str] = None) -> Stored:
+        """Deletes a volume and what it holds. One attached to a machine is refused: delete the machine first."""
+        return self._c.delete(self.id, idempotency_key=idempotency_key)
+
+    def update(self, *, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "Volume":
+        """Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is."""
+        self.info = self._c.update(self.id, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
+        return self
+
+    def __enter__(self) -> "Volume":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        """Deletes it when the ``with`` block that holds it ends."""
+        self.delete()
 
 
 class Volumes:
@@ -47,21 +180,149 @@ class Volumes:
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
 
-    def create(self, *, size_mib: int, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idempotency_key: Optional[str] = None) -> Stored:
+    def create(self, *, size_mib: int, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Volume:
         """Creates an empty volume. Asked again with the same Idempotency-Key, it returns the same one."""
-        return Stored.from_dict(self._transport.request("POST", f"/v2/volumes", body=compact({"sizeMiB": size_mib, "name": name, "labels": labels}), idempotency_key=idempotency_key, idempotent=True))
+        return Volume(self, Stored.from_dict(self._transport.request("POST", f"/v2/volumes", body=compact({"sizeMiB": size_mib, "name": name, "labels": labels, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True)))
 
     def list(self, *, name: Optional[str] = None, state: Optional[str] = None, label: Optional[List[str]] = None, cursor: Optional[str] = None, limit: Optional[int] = None) -> Page[Stored]:
         """Lists the project's volumes, newest first."""
         return page(self._transport.request("GET", f"/v2/volumes", query={"name": name, "state": state, "label": label, "cursor": cursor, "limit": limit}, idempotent=True), Stored.from_dict, lambda c: self.list(name=name, state=state, label=label, cursor=c, limit=limit))
 
-    def get(self, id: str) -> Stored:
+    def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> Volume:
         """Returns a volume."""
-        return Stored.from_dict(self._transport.request("GET", f"/v2/volumes/{quote(id, safe='')}", idempotent=True))
+        return Volume(self, Stored.from_dict(self._transport.request("GET", f"/v2/volumes/{quote(id, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True)))
 
     def delete(self, id: str, *, idempotency_key: Optional[str] = None) -> Stored:
-        """Deletes a volume and what it holds. One attached to a sandbox is refused: delete the sandbox first."""
+        """Deletes a volume and what it holds. One attached to a machine is refused: delete the machine first."""
         return Stored.from_dict(self._transport.request("DELETE", f"/v2/volumes/{quote(id, safe='')}", idempotency_key=idempotency_key))
+
+    def update(self, id: str, *, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Stored:
+        """Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is."""
+        return Stored.from_dict(self._transport.request("POST", f"/v2/volumes/{quote(id, safe='')}:update", body=compact({"deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True))
+
+
+class AsyncVolume:
+    """One of volumes: A disk that outlives the machines it is attached to."""
+
+    def __init__(self, client: "AsyncVolumes", info: Stored) -> None:
+        self._c = client
+        #: What it was when last read.
+        self.info = info
+
+    @property
+    def id(self) -> str:
+        """Its id."""
+        return self.info.id
+
+    @property
+    def object(self) -> Literal["snapshot", "image", "volume", "unknown"]:
+        """Its kind: `snapshot`, `image` or `volume`."""
+        return self.info.object
+
+    @property
+    def name(self) -> Optional[str]:
+        """Its name, unique in its project among its kind."""
+        return self.info.name
+
+    @property
+    def state(self) -> Literal["making", "ready", "failed", "deleted", "unknown"]:
+        """Where it is."""
+        return self.info.state
+
+    @property
+    def labels(self) -> Dict[str, str]:
+        """Its labels."""
+        return self.info.labels
+
+    @property
+    def size_bytes(self) -> int:
+        """What it was made to hold, in bytes."""
+        return self.info.size_bytes
+
+    @property
+    def stored_bytes(self) -> int:
+        """What it holds now, in bytes."""
+        return self.info.stored_bytes
+
+    @property
+    def parent_id(self) -> Optional[str]:
+        """What it was made from (a snapshot's machine, an image's base), if anything."""
+        return self.info.parent_id
+
+    @property
+    def attached_to(self) -> Optional[str]:
+        """The machine it is attached to now, if any."""
+        return self.info.attached_to
+
+    @property
+    def created_at(self) -> Optional[str]:
+        """When it was made."""
+        return self.info.created_at
+
+    @property
+    def version(self) -> Optional[int]:
+        """An image's version of its name: each build or keep of a name is its next."""
+        return self.info.version
+
+    @property
+    def tags(self) -> Optional[List[str]]:
+        """An image's tags, each `name:tag`."""
+        return self.info.tags
+
+    @property
+    def error(self) -> Optional[str]:
+        """Why an image's build failed."""
+        return self.info.error
+
+    @property
+    def deleted_at(self) -> Optional[str]:
+        """When it was deleted: a delete's answer, its state `deleted`."""
+        return self.info.deleted_at
+
+    @property
+    def delete_at(self) -> Optional[str]:
+        """When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted."""
+        return self.info.delete_at
+
+    @property
+    def delete_waits_for(self) -> Optional[str]:
+        """Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does."""
+        return self.info.delete_waits_for
+
+    @property
+    def delete_protection(self) -> Optional[bool]:
+        """Whether its delete is refused (409 `delete_protected`) until an update turns this off."""
+        return self.info.delete_protection
+
+    def __repr__(self) -> str:
+        return f"AsyncVolume({self.info!r})"
+
+    @classmethod
+    async def create(cls, *, api_key: Optional[str] = None, base_url: Optional[str] = None, project: Optional[str] = None, size_mib: int, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "AsyncVolume":
+        """Makes one and returns it, as ``Runtime().volumes.create()`` does, with a client of its own: ``RUNTIME_API_KEY``,
+        or ``api_key``. The other arguments are the create's."""
+        return await AsyncVolumes(AsyncTransport(api_key=api_key, base_url=base_url, project=project)).create(size_mib=size_mib, name=name, labels=labels, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
+
+    async def refresh(self, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> "AsyncVolume":
+        """Returns a volume."""
+        self.info = (await self._c.get(self.id, wait=wait, if_state=if_state)).info
+        return self
+
+    async def delete(self, *, idempotency_key: Optional[str] = None) -> Stored:
+        """Deletes a volume and what it holds. One attached to a machine is refused: delete the machine first."""
+        return await self._c.delete(self.id, idempotency_key=idempotency_key)
+
+    async def update(self, *, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> "AsyncVolume":
+        """Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is."""
+        self.info = await self._c.update(self.id, delete_after_seconds=delete_after_seconds, delete_protection=delete_protection, idempotency_key=idempotency_key)
+        return self
+
+    async def __aenter__(self) -> "AsyncVolume":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        """Deletes it when the ``async with`` block that holds it ends."""
+        await self.delete()
 
 
 class AsyncVolumes:
@@ -70,21 +331,25 @@ class AsyncVolumes:
     def __init__(self, transport: AsyncTransport) -> None:
         self._transport = transport
 
-    async def create(self, *, size_mib: int, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, idempotency_key: Optional[str] = None) -> Stored:
+    async def create(self, *, size_mib: int, name: Optional[str] = None, labels: Optional[Dict[str, str]] = None, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> AsyncVolume:
         """Creates an empty volume. Asked again with the same Idempotency-Key, it returns the same one."""
-        return Stored.from_dict(await self._transport.request("POST", f"/v2/volumes", body=compact({"sizeMiB": size_mib, "name": name, "labels": labels}), idempotency_key=idempotency_key, idempotent=True))
+        return AsyncVolume(self, Stored.from_dict(await self._transport.request("POST", f"/v2/volumes", body=compact({"sizeMiB": size_mib, "name": name, "labels": labels, "deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True)))
 
     async def list(self, *, name: Optional[str] = None, state: Optional[str] = None, label: Optional[List[str]] = None, cursor: Optional[str] = None, limit: Optional[int] = None) -> AsyncPage[Stored]:
         """Lists the project's volumes, newest first."""
         return async_page(await self._transport.request("GET", f"/v2/volumes", query={"name": name, "state": state, "label": label, "cursor": cursor, "limit": limit}, idempotent=True), Stored.from_dict, lambda c: self.list(name=name, state=state, label=label, cursor=c, limit=limit))
 
-    async def get(self, id: str) -> Stored:
+    async def get(self, id: str, *, wait: Optional[float] = None, if_state: Optional[str] = None) -> AsyncVolume:
         """Returns a volume."""
-        return Stored.from_dict(await self._transport.request("GET", f"/v2/volumes/{quote(id, safe='')}", idempotent=True))
+        return AsyncVolume(self, Stored.from_dict(await self._transport.request("GET", f"/v2/volumes/{quote(id, safe='')}", query={"wait": wait, "ifState": if_state}, idempotent=True)))
 
     async def delete(self, id: str, *, idempotency_key: Optional[str] = None) -> Stored:
-        """Deletes a volume and what it holds. One attached to a sandbox is refused: delete the sandbox first."""
+        """Deletes a volume and what it holds. One attached to a machine is refused: delete the machine first."""
         return Stored.from_dict(await self._transport.request("DELETE", f"/v2/volumes/{quote(id, safe='')}", idempotency_key=idempotency_key))
 
+    async def update(self, id: str, *, delete_after_seconds: Optional[int] = None, delete_protection: Optional[bool] = None, idempotency_key: Optional[str] = None) -> Stored:
+        """Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is."""
+        return Stored.from_dict(await self._transport.request("POST", f"/v2/volumes/{quote(id, safe='')}:update", body=compact({"deleteAfterSeconds": delete_after_seconds, "deleteProtection": delete_protection}), idempotency_key=idempotency_key, idempotent=True))
 
-__all__ = ["VolumeCreate", "Volumes", "AsyncVolumes"]
+
+__all__ = ["VolumeCreate", "Volumes", "Volume", "AsyncVolumes", "AsyncVolume"]

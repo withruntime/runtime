@@ -6,7 +6,7 @@ import { Paginated } from "./runtime.js";
 
 /** A private network's settings, as it keeps them. */
 export interface NetworkSettings {
-  /** The machines in it, by ID; none for every sandbox of the org. */
+  /** The machines in it, by ID; none for every machine of the org. */
   members?: string[];
 }
 
@@ -30,15 +30,15 @@ export type NetworkListQuery = {
   limit?: number;
 };
 
-/** A private network: its sandboxes reach each other by name, over TCP. */
+/** A private network: its machines reach each other by name, over TCP. */
 export class Networks {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the org's private networks, by name. */
-  list(query: NetworkListQuery = {}, options?: RequestOptions): Paginated<Network> {
-    return new Paginated<Network>((cursor) => this.#t.request<Page<Network>>("GET", `/v2/networks`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: NetworkListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Network> {
+    return new Paginated<Network>((cursor) => this.transport.request<Page<Network>>("GET", `/v2/networks`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 }

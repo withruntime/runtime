@@ -37,7 +37,7 @@ class Me:
     project_name: Optional[str] = None
     #: The built-in role of the grant that admits it (owner, admin, developer, viewer, billing); none for an org's own role.
     role: Optional[str] = None
-    #: How the organization pays: `test` (no card yet: every call is answered, and nothing runs or is billed), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted).
+    #: How the organization pays: `test` (no card yet: every call that creates or changes a machine, volume or address answers 402 `card_required`), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted).
     billing: Optional[Literal["test", "trial", "live", "grace", "paused", "unknown"]] = None
 
     @classmethod

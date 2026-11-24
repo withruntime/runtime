@@ -6,187 +6,528 @@ require_relative "runtime"
 require_relative "sandboxes"
 
 module Withruntime
-  module Generated
-    # A development environment: a machine running VS Code in the browser (code-server) on port 8080 over /workspace, reached at its private preview, as Codespaces and Gitpod give one. It pauses after 30 minutes with nothing happening, its memory kept.
-    class Workspaces
-      def initialize(transport)
-        @transport = transport
-      end
+  # A workspace's files.
+  class WorkspaceFiles
+    def initialize(client, id)
+      @c = client
+      @id = id
+    end
 
-      # Creates a workspace. Asked again with the same Idempotency-Key, it returns the same workspace.
-      def create(vcpu: nil, memory_gb: nil, disk_gb: nil, image: nil, secrets: nil, start: nil, user: nil, volumes: nil, run: nil, name: nil, labels: nil, get_or_create: nil, max_cost: nil, idle_pause_seconds: nil, snapshot: nil, network: nil, env: nil, idempotency_key: nil)
-        Sandbox.from(@transport.request("POST", "/v2/workspaces", body: { "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "image" => image, "secrets" => secrets, "start" => start, "user" => user, "volumes" => volumes, "run" => run, "name" => name, "labels" => labels, "getOrCreate" => get_or_create, "maxCost" => max_cost, "idlePauseSeconds" => idle_pause_seconds, "snapshot" => snapshot, "network" => network, "env" => env }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Returns a file's bytes.
+    def read(path)
+      @c.read(@id, path: path)
+    end
 
-      # Returns a workspace.
-      def get(id, wait: nil, if_state: nil)
-        Sandbox.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true))
-      end
+    # Writes the request's bytes to a file as they come, of any size (Content-Length required), its folders made: the file whole when they all came, or as it was. With offset, they are written into it in place.
+    def write(path, data, mode: nil, offset: nil, sha256: nil, idempotency_key: nil)
+      @c.write(@id, data, path: path, mode: mode, offset: offset, sha256: sha256, idempotency_key: idempotency_key)
+    end
 
-      # Lists the project's workspaces, newest first.
-      def list(state: nil, name: nil, label: nil, cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/workspaces", query: { "state" => state, "name" => name, "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Sandbox.from(i) }
-      end
+    # Removes a file, a link or a directory (recursive for one with contents). One missing is success, removed false.
+    def remove(path, recursive: nil, idempotency_key: nil)
+      @c.remove(@id, path: path, recursive: recursive, idempotency_key: idempotency_key)
+    end
 
-      # Deletes a workspace, its memory and its disk.
-      def delete(id, idempotency_key: nil)
-        Sandbox.from(@transport.request("DELETE", "/v2/workspaces/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
-      end
+    # Returns what is at a path: a file, a directory or a link, or nothing (exists false). With sha256=true, a file's SHA-256 too.
+    def stat(path, sha256: nil)
+      @c.stat(@id, path: path, sha256: sha256)
+    end
 
-      # Pauses a workspace with its memory and disk kept. A call to it resumes it.
-      def pause(id, idempotency_key: nil)
-        Sandbox.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:pause", idempotency_key: idempotency_key))
-      end
+    # Lists a directory's entries in path order, to a depth.
+    def list(path: nil, depth: nil, limit: nil, hidden: nil, glob: nil)
+      @c.list_files(@id, path: path, depth: depth, limit: limit, hidden: hidden, glob: glob)
+    end
 
-      # Resumes a paused workspace where it was, its memory and processes as they were.
-      def resume(id, idempotency_key: nil)
-        Sandbox.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:resume", idempotency_key: idempotency_key))
-      end
+    # Returns a folder as a tar archive (`application/x-tar`, or `application/gzip` with gzip), packed by tar in the workspace as it streams, of any size; its entries are relative to the folder (`./a.txt`). A folder that fails part way (a file it may not read, or one that changes as it is read) ends as an archive every tar reader refuses, never as a short one that reads whole. At most 4 at once in a workspace. A paused workspace is woken first.
+    def download_folder(path, gzip: nil, user: nil, exclude: nil)
+      @c.download_folder(@id, path: path, gzip: gzip, user: user, exclude: exclude)
+    end
 
-      # Runs a command as a process and returns it once it ended, with its output; with wait false, at once, while it runs. A paused workspace is resumed first. Asked again with the same Idempotency-Key, it runs nothing more: it returns the first run's process, waiting for its end while it runs.
-      def exec(id, cmd:, cwd: nil, env: nil, stdin: nil, timeout_seconds: nil, stream: nil, wait: nil, stdin_open: nil, output_encoding: nil, pty: nil, user: nil, idempotency_key: nil)
-        Process.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:exec", body: { "cmd" => cmd, "cwd" => cwd, "env" => env, "stdin" => stdin, "timeoutSeconds" => timeout_seconds, "stream" => stream, "wait" => wait, "stdinOpen" => stdin_open, "outputEncoding" => output_encoding, "pty" => pty, "user" => user }.compact, idempotency_key: idempotency_key, idempotent: true, runs: true, runs_seconds: timeout_seconds))
-      end
+    # Unpacks the request's tar archive (gzip-compressed or not, told by its first bytes) into a folder, made with its parents, by tar in the workspace as the bytes arrive, of any size, nothing of it kept on disk but what tar writes; returns once tar has ended, or 400 `invalid_archive` with what tar said. A paused workspace is woken first.
+    def upload_folder(path, data, user: nil, idempotency_key: nil)
+      @c.upload_folder(@id, data, path: path, user: user, idempotency_key: idempotency_key)
+    end
 
-      # Returns a file's bytes.
-      def read(id, path:)
-        @transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files", query: { "path" => path }, raw: true, idempotent: true)
-      end
+    # Begins a folder's upload in parts: tar starts in the workspace, unpacking into the folder each part as it arrives. Send the parts in order by offset (writeFolderUpload), then commitFolderUpload; an upload no call names for 10 minutes is ended. A paused workspace is woken first.
+    def begin_folder_upload(path, gzip: nil, user: nil, idempotency_key: nil)
+      @c.begin_folder_upload(@id, path: path, gzip: gzip, user: user, idempotency_key: idempotency_key)
+    end
 
-      # Writes the request's bytes to a file as they come, of any size (Content-Length required), its folders made: the file whole when they all came, or as it was. With offset, they are written into it in place.
-      def write(id, data, path:, mode: nil, offset: nil, sha256: nil, idempotency_key: nil)
-        FileWritten.from(@transport.request("PUT", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files", query: { "path" => path, "mode" => mode, "offset" => offset, "sha256" => sha256 }, data: data, idempotency_key: idempotency_key))
-      end
+    # Sends the request's bytes, a part of the archive at its offset, into tar's input as they arrive, of any size, and returns the bytes received in all once tar took them. A part past them is refused 409 `upload_incomplete`, naming them: send the parts in order.
+    def write_folder_upload(upload, data, offset: nil, idempotency_key: nil)
+      @c.write_folder_upload(@id, upload, data, offset: offset, idempotency_key: idempotency_key)
+    end
 
-      # Returns a process's output after a cursor, and the cursor to read on from. The latest 1 MiB is kept; truncated says when the cursor fell behind.
-      def process_output(id, process, cursor: nil, wait_seconds: nil, max_bytes: nil, follow: nil)
-        ProcessOutput.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}/output", query: { "cursor" => cursor, "waitSeconds" => wait_seconds, "maxBytes" => max_bytes, "follow" => follow }, idempotent: true))
-      end
+    # Ends a folder upload's input and returns once tar has ended, as an exec returns once its command has: the folder, or 400 `invalid_archive` with what tar said. A front that restarts meanwhile returns 503 `run_goes_on`; sent again, it returns how tar ended. An upload no call has named for 10 minutes since its last part or commit is ended.
+    def commit_folder_upload(upload, idempotency_key: nil)
+      @c.commit_folder_upload(@id, upload, idempotency_key: idempotency_key)
+    end
 
-      # Sends input to a process started with stdinOpen or a pty, and returns how much of its input it has taken.
-      def write_process(id, process, data: nil, offset: nil, eof: nil, idempotency_key: nil)
-        ProcessWritten.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:write", body: { "data" => data, "offset" => offset, "eof" => eof }.compact, idempotency_key: idempotency_key))
-      end
+    # Stops a folder upload's tar; what it unpacked so far stays.
+    def abort_folder_upload(upload, idempotency_key: nil)
+      @c.abort_folder_upload(@id, upload, idempotency_key: idempotency_key)
+    end
 
-      # Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe.
-      def signal_process(id, process, signal: nil, idempotency_key: nil)
-        Process.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:signal", body: { "signal" => signal }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Makes a directory, and its parents unless parents is false. One there already is success, created false.
+    def mkdir(path, parents: nil, idempotency_key: nil)
+      @c.mkdir(@id, path: path, parents: parents, idempotency_key: idempotency_key)
+    end
 
-      # Lists a workspace's processes, newest first: those running and those that ended lately.
-      def list_processes(id)
-        ProcessList.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/processes", idempotent: true))
-      end
+    # Moves a file, a link or a directory; refused 409 when something is at its new path, unless overwrite. With sha256 or size, a file written in parts is put in place once whole: its writes ended, then only a file of that size with every byte written and whose bytes hash to it moves; refused 409 `upload_incomplete` or `checksum_mismatch`, nothing moved. With sha256, it is safe to send again: once moved, it returns the same answer while `from` is gone and `to` holds those bytes.
+    def rename(from:, to:, overwrite: nil, sha256: nil, size: nil, idempotency_key: nil)
+      @c.rename(@id, from: from, to: to, overwrite: overwrite, sha256: sha256, size: size, idempotency_key: idempotency_key)
+    end
 
-      # Removes a file, a link or a directory (recursive for one with contents). One missing is success, removed false.
-      def remove(id, path:, recursive: nil, idempotency_key: nil)
-        FileRemoved.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:remove", body: { "path" => path, "recursive" => recursive }.compact, idempotency_key: idempotency_key))
-      end
+    # Makes an expiring address for one file that anyone may open with no API key, from a browser, curl or another service: GET downloads it (Range works, so videos play and downloads resume; archive: true downloads a folder as .tar.gz), PUT with the raw body uploads it (up to maxBytes, written whole; Content-Length required). The link acts as the key that made it: an upload link needs write, and the link ends with its key, with revokeLinks or with its workspace. A paused workspace is woken for it unless wake is false.
+    def link(path, method: nil, expires_in_seconds: nil, filename: nil, max_bytes: nil, wake: nil, archive: nil, idempotency_key: nil)
+      @c.link(@id, path: path, method: method, expires_in_seconds: expires_in_seconds, filename: filename, max_bytes: max_bytes, wake: wake, archive: archive, idempotency_key: idempotency_key)
+    end
 
-      # Returns what is at a path: a file, a directory or a link, or nothing (exists false). With sha256=true, a file's SHA-256 too.
-      def stat(id, path:, sha256: nil)
-        FileInfo.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/stat", query: { "path" => path, "sha256" => sha256 }, idempotent: true))
-      end
+    # Ends every file link made for a workspace so far; links made after work.
+    def revoke_links(idempotency_key: nil)
+      @c.revoke_links(@id, idempotency_key: idempotency_key)
+    end
+  end
 
-      # Lists a directory's entries in path order, to a depth.
-      def list_files(id, path: nil, depth: nil, limit: nil, hidden: nil, glob: nil)
-        FileList.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/list", query: { "path" => path, "depth" => depth, "limit" => limit, "hidden" => hidden, "glob" => glob }, idempotent: true))
-      end
+  # A workspace's processes.
+  class WorkspaceProcesses
+    def initialize(client, id)
+      @c = client
+      @id = id
+    end
 
-      # Returns a folder as a tar archive (`application/x-tar`, or `application/gzip` with gzip), packed by tar in the workspace as it streams, of any size; its entries are relative to the folder (`./a.txt`). A folder that fails part way (a file it may not read, or one that changes as it is read) ends as an archive every tar reader refuses, never as a short one that reads whole. At most 4 at once in a workspace. A paused workspace is woken first.
-      def download_folder(id, path:, gzip: nil, user: nil, exclude: nil)
-        @transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive", query: { "path" => path, "gzip" => gzip, "user" => user, "exclude" => exclude }, raw: true, idempotent: true)
-      end
+    # Returns a process's output after a cursor, and the cursor to read on from. The latest 1 MiB is kept; truncated says when the cursor fell behind.
+    def output(process, cursor: nil, wait_seconds: nil, max_bytes: nil, follow: nil)
+      @c.process_output(@id, process, cursor: cursor, wait_seconds: wait_seconds, max_bytes: max_bytes, follow: follow)
+    end
 
-      # Unpacks the request's tar archive (gzip-compressed or not, told by its first bytes) into a folder, made with its parents, by tar in the workspace as the bytes arrive, of any size, nothing of it kept on disk but what tar writes; returns once tar has ended, or 400 `invalid_archive` with what tar said. A paused workspace is woken first.
-      def upload_folder(id, data, path:, user: nil, idempotency_key: nil)
-        FolderUnpacked.from(@transport.request("PUT", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive", query: { "path" => path, "user" => user }, data: data, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Sends input to a process started with stdinOpen or a pty, and returns how much of its input it has taken.
+    def write(process, data: nil, offset: nil, eof: nil, idempotency_key: nil)
+      @c.write_process(@id, process, data: data, offset: offset, eof: eof, idempotency_key: idempotency_key)
+    end
 
-      # Begins a folder's upload in parts: tar starts in the workspace, unpacking into the folder each part as it arrives. Send the parts in order by offset (writeFolderUpload), then commitFolderUpload; an upload no call names for 10 minutes is ended. A paused workspace is woken first.
-      def begin_folder_upload(id, path:, gzip: nil, user: nil, idempotency_key: nil)
-        FolderUpload.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive/uploads", body: { "path" => path, "gzip" => gzip, "user" => user }.compact, idempotency_key: idempotency_key))
-      end
+    # Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe.
+    def signal(process, signal: nil, idempotency_key: nil)
+      @c.signal_process(@id, process, signal: signal, idempotency_key: idempotency_key)
+    end
 
-      # Sends the request's bytes, a part of the archive at its offset, into tar's input as they arrive, of any size, and returns the bytes received in all once tar took them. A part past them is refused 409 `upload_incomplete`, naming them: send the parts in order.
-      def write_folder_upload(id, upload, data, offset: nil, idempotency_key: nil)
-        FolderUploadReceived.from(@transport.request("PUT", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}", query: { "offset" => offset }, data: data, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe.
+    def resize(process, cols:, rows:, idempotency_key: nil)
+      @c.resize_process(@id, process, cols: cols, rows: rows, idempotency_key: idempotency_key)
+    end
 
-      # Ends a folder upload's input and returns once tar has ended, as an exec returns once its command has: the folder, or 400 `invalid_archive` with what tar said. A front that restarts meanwhile returns 503 `run_goes_on`; sent again, it returns how tar ended. An upload no call has named for 10 minutes since its last part or commit is ended.
-      def commit_folder_upload(id, upload, idempotency_key: nil)
-        FolderUnpacked.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}:commit", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Lists a workspace's processes, newest first: those running and those that ended lately.
+    def list()
+      @c.list_processes(@id)
+    end
+  end
 
-      # Stops a folder upload's tar; what it unpacked so far stays.
-      def abort_folder_upload(id, upload, idempotency_key: nil)
-        FolderUploadAborted.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}:abort", idempotency_key: idempotency_key, idempotent: true))
-      end
+  # A workspace's network.
+  class WorkspaceNetwork
+    def initialize(client, id)
+      @c = client
+      @id = id
+    end
 
-      # Makes a directory, and its parents unless parents is false. One there already is success, created false.
-      def mkdir(id, path:, parents: nil, idempotency_key: nil)
-        FileMade.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:mkdir", body: { "path" => path, "parents" => parents }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Returns where a workspace may connect out.
+    def get()
+      @c.get_network(@id)
+    end
 
-      # Moves a file, a link or a directory; refused 409 when something is at its new path, unless overwrite. With sha256 or size, a file written in parts is put in place once whole: its writes ended, then only a file of that size with every byte written and whose bytes hash to it moves; refused 409 `upload_incomplete` or `checksum_mismatch`, nothing moved. With sha256, it is safe to send again: once moved, it returns the same answer while `from` is gone and `to` holds those bytes.
-      def rename(id, from:, to:, overwrite: nil, sha256: nil, size: nil, idempotency_key: nil)
-        FileRenamed.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:rename", body: { "from" => from, "to" => to, "overwrite" => overwrite, "sha256" => sha256, "size" => size }.compact, idempotency_key: idempotency_key))
-      end
+    # Replaces where a workspace may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut.
+    def set(allow_outbound: nil, deny_outbound: nil, idempotency_key: nil)
+      @c.set_network(@id, allow_outbound: allow_outbound, deny_outbound: deny_outbound, idempotency_key: idempotency_key)
+    end
+  end
 
-      # Makes an expiring address for one file that anyone may open with no API key, from a browser, curl or another service: GET downloads it (Range works, so videos play and downloads resume; archive: true downloads a folder as .tar.gz), PUT with the raw body uploads it (up to maxBytes, written whole; Content-Length required). The link acts as the key that made it: an upload link needs write, and the link ends with its key, with revokeLinks or with its workspace. A paused workspace is woken for it unless wake is false.
-      def link(id, path:, method: nil, expires_in_seconds: nil, filename: nil, max_bytes: nil, wake: nil, archive: nil, idempotency_key: nil)
-        FileLink.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:link", body: { "path" => path, "method" => method, "expiresInSeconds" => expires_in_seconds, "filename" => filename, "maxBytes" => max_bytes, "wake" => wake, "archive" => archive }.compact, idempotency_key: idempotency_key))
-      end
+  # One of workspaces: A development environment: a machine running VS Code in the browser (code-server) on port 8080 over /workspace, reached at its private preview, as Codespaces and Gitpod give one. It pauses after 30 minutes with nothing happening, its memory kept.
+  class Workspace
+    # What it was when last read, and what is under it.
+    attr_reader :info, :files, :processes, :network
 
-      # Ends every file link made for a workspace so far; links made after work.
-      def revoke_links(id, idempotency_key: nil)
-        FileLinksRevoked.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:revokeLinks", idempotency_key: idempotency_key))
-      end
+    def initialize(client, info)
+      @c = client
+      @info = info
+      @files = WorkspaceFiles.new(client, info.id)
+      @processes = WorkspaceProcesses.new(client, info.id)
+      @network = WorkspaceNetwork.new(client, info.id)
+    end
 
-      # Returns where a workspace may connect out.
-      def get_network(id)
-        SandboxNetwork.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/network", idempotent: true))
-      end
+    # Its id.
+    def id
+      @info.id
+    end
 
-      # Returns a workspace's CPU, memory, disks and pressure, as its host reads them from the workspace's own cgroup over a fifth of a second: never a call into the workspace, so it does not wake a paused one nor keep one from its idle pause. One that is not running has no reading.
-      def metrics(id, range: nil)
-        SandboxMetrics.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/metrics", query: { "range" => range }, idempotent: true))
-      end
+    # Its vCPUs; its product's default when omitted.
+    def vcpu
+      @info.vcpu
+    end
 
-      # Replaces where a workspace may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut.
-      def set_network(id, allow_outbound: nil, deny_outbound: nil, idempotency_key: nil)
-        SandboxNetwork.from(@transport.request("PUT", "/v2/workspaces/#{URI.encode_www_form_component(id)}/network", body: { "allowOutbound" => allow_outbound, "denyOutbound" => deny_outbound }.compact, idempotency_key: idempotency_key))
-      end
+    # Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted.
+    def memory_gb
+      @info.memory_gb
+    end
 
-      # Copies a workspace as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies.
-      def fork(id, count: nil, name: nil, labels: nil, secrets: nil, max_cost: nil, idle_pause_seconds: nil, idempotency_key: nil)
-        Forked.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:fork", body: { "count" => count, "name" => name, "labels" => labels, "secrets" => secrets, "maxCost" => max_cost, "idlePauseSeconds" => idle_pause_seconds }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger.
+    def disk_gb
+      @info.disk_gb
+    end
 
-      # Keeps a workspace's memory and disk as they are now, a snapshot to start workspaces from; with `image`, its disk alone as that image's next version. The workspace runs on. Asked again with the same Idempotency-Key, it returns the same snapshot.
-      def snapshot(id, name: nil, labels: nil, image: nil, start: nil, idempotency_key: nil)
-        Stored.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:snapshot", body: { "name" => name, "labels" => labels, "image" => image, "start" => start }.compact, idempotency_key: idempotency_key, idempotent: true))
-      end
+    # The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted.
+    def image
+      @info.image
+    end
 
-      # Changes its name, labels, idle pause, maxCost, environment or sizes; each field left out stays as it is. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on; a smaller size, or a sandbox that is not running, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412.
-      def update(id, name: nil, labels: nil, idle_pause_seconds: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, user: nil, env: nil, remove_env: nil, max_cost: nil, idempotency_key: nil)
-        Sandbox.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:update", body: { "name" => name, "labels" => labels, "idlePauseSeconds" => idle_pause_seconds, "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "user" => user, "env" => env, "removeEnv" => remove_env, "maxCost" => max_cost }.compact, idempotency_key: idempotency_key))
-      end
+    # The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it.
+    def secrets
+      @info.secrets
+    end
 
-      # Returns what a workspace's screen shows now, as `image/png` (or `image/jpeg`): its X display `:1`, whole. Refused 409 `display_not_running` when no display runs. A paused workspace is resumed first.
-      def screenshot(id, format: nil, quality: nil)
-        @transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/screenshot", query: { "format" => format, "quality" => quality }, raw: true, idempotent: true)
-      end
+    # The command it starts at every fresh boot and keeps running, as a service: a web server, a runner, a desktop. A wake with its memory kept does not start it again. Its image's when omitted.
+    def start
+      @info.start
+    end
 
-      # Moves, clicks, drags and scrolls the mouse and types on the keyboard of a workspace's screen (its X display `:1`), each step in turn as one command, and returns where the mouse is then. It stops at the first step that fails, refused 409 `act_failed` naming it; refused 409 `display_not_running` when no display runs. A paused workspace is resumed first.
-      def act(id, actions:, idempotency_key: nil)
-        Acted.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:act", body: { "actions" => actions }.compact, idempotency_key: idempotency_key))
-      end
+    # Who every command, process, terminal and code run in it runs as when the call names no `user`: `runtime` (uid 1000, with passwordless sudo) or `root`. Its image's when omitted, else `runtime`.
+    def user
+      @info.user
+    end
 
-      # Runs a cell of Python in a workspace as a notebook does, in a Jupyter kernel it keeps running for the cell's `context`: variables, imports and functions stay for the next cell. Returns what it printed, its values and displays (text, HTML, images such as charts), and its exception with its traceback. The context's kernel starts on its first cell. A cell past `timeoutSeconds` is interrupted and its context kept. Refused 409 `kernel_not_installed` when the image has no ipykernel. A paused workspace is resumed first.
-      def run_code(id, code:, language: nil, context: nil, timeout_seconds: nil, idempotency_key: nil)
-        CodeRun.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:runCode", body: { "code" => code, "language" => language, "context" => context, "timeoutSeconds" => timeout_seconds }.compact, idempotency_key: idempotency_key))
-      end
+    # Its product's kind: `sandbox` for a sandbox, `app` for an app, and so on.
+    def object
+      @info.object
+    end
+
+    # Its name, unique in its project.
+    def name
+      @info.name
+    end
+
+    # Where it is.
+    def state
+      @info.state
+    end
+
+    # Its labels.
+    def labels
+      @info.labels
+    end
+
+    # When it was created.
+    def created_at
+      @info.created_at
+    end
+
+    # When it was deleted: a delete's answer alone.
+    def deleted_at
+      @info.deleted_at
+    end
+
+    # Its revision, changed by every change to it: what an update's If-Match names.
+    def revision
+      @info.revision
+    end
+
+    # Seconds with nothing happening before it pauses; 0 never.
+    def idle_pause_seconds
+      @info.idle_pause_seconds
+    end
+
+    # The most it may cost in all, in US dollars; none when it has no such cap.
+    def max_cost
+      @info.max_cost
+    end
+
+    # Whether a call that reaches it paused resumes it; false: only its own resume does, and such a call answers 409 sandbox_paused.
+    def auto_wake
+      @info.auto_wake
+    end
+
+    # Its run's exit code, once its run ended; none for one a signal or its timeout ended.
+    def exit_code
+      @info.exit_code
+    end
+
+    # When its run ended.
+    def ended_at
+      @info.ended_at
+    end
+
+    # When its pause began (or its run ended), while it is paused.
+    def paused_at
+      @info.paused_at
+    end
+
+    # A create's answer alone, for a start with a ready check: how its wait went.
+    def ready
+      @info.ready
+    end
+
+    # When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted.
+    def delete_at
+      @info.delete_at
+    end
+
+    # Whether its delete is refused (409 `delete_protected`) until an update turns this off.
+    def delete_protection
+      @info.delete_protection
+    end
+
+    def inspect
+      "#<Workspace #{@info.inspect}>"
+    end
+
+    # Returns a workspace.
+    def refresh(wait: nil, if_state: nil)
+      @info = @c.get(@info.id, wait: wait, if_state: if_state).info
+      self
+    end
+
+    # Deletes a workspace, its memory and its disk.
+    def delete(idempotency_key: nil)
+      @c.delete(@info.id, idempotency_key: idempotency_key)
+    end
+
+    # Pauses a workspace with its memory and disk kept. A call to it resumes it.
+    def pause(idempotency_key: nil)
+      @info = @c.pause(@info.id, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Resumes a paused workspace where it was, its memory and processes as they were.
+    def resume(idempotency_key: nil)
+      @info = @c.resume(@info.id, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Runs a command as a process and returns it once it ended, with its output; with wait false, at once, while it runs. A paused workspace is resumed first. Asked again with the same Idempotency-Key, it runs nothing more: it returns the first run's process, waiting for its end while it runs.
+    def exec(cmd, cwd: nil, env: nil, stdin: nil, timeout_seconds: nil, stream: nil, wait: nil, stdin_open: nil, output_encoding: nil, pty: nil, user: nil, idempotency_key: nil)
+      @c.exec(@info.id, cmd: cmd, cwd: cwd, env: env, stdin: stdin, timeout_seconds: timeout_seconds, stream: stream, wait: wait, stdin_open: stdin_open, output_encoding: output_encoding, pty: pty, user: user, idempotency_key: idempotency_key)
+    end
+
+    # Returns a workspace's CPU, memory, disks and pressure, as its host reads them from the workspace's own cgroup over a fifth of a second: never a call into the workspace, so it does not wake a paused one nor keep one from its idle pause. One that is not running has no reading.
+    def metrics(range: nil)
+      @c.metrics(@info.id, range: range)
+    end
+
+    # Copies a workspace as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies.
+    def fork(count: nil, name: nil, labels: nil, secrets: nil, max_cost: nil, idle_pause_seconds: nil, vcpu: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      @c.fork(@info.id, count: count, name: name, labels: labels, secrets: secrets, max_cost: max_cost, idle_pause_seconds: idle_pause_seconds, vcpu: vcpu, delete_after_seconds: delete_after_seconds, delete_protection: delete_protection, idempotency_key: idempotency_key)
+    end
+
+    # Keeps a workspace's memory and disk as they are now, a snapshot to start workspaces from; with `image`, its disk alone as that image's next version. The workspace runs on. Asked again with the same Idempotency-Key, it returns the same snapshot.
+    def snapshot(name: nil, labels: nil, image: nil, start: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      @c.snapshot(@info.id, name: name, labels: labels, image: image, start: start, delete_after_seconds: delete_after_seconds, delete_protection: delete_protection, idempotency_key: idempotency_key)
+    end
+
+    # Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused.
+    def update(name: nil, labels: nil, idle_pause_seconds: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, user: nil, env: nil, remove_env: nil, max_cost: nil, auto_wake: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      @info = @c.update(@info.id, name: name, labels: labels, idle_pause_seconds: idle_pause_seconds, vcpu: vcpu, memory_gb: memory_gb, disk_gb: disk_gb, user: user, env: env, remove_env: remove_env, max_cost: max_cost, auto_wake: auto_wake, delete_after_seconds: delete_after_seconds, delete_protection: delete_protection, idempotency_key: idempotency_key)
+      self
+    end
+
+    # Returns what a workspace's screen shows now, as `image/png` (or `image/jpeg`): its X display `:1`, whole. Refused 409 `display_not_running` when no display runs. A paused workspace is resumed first.
+    def screenshot(format: nil, quality: nil)
+      @c.screenshot(@info.id, format: format, quality: quality)
+    end
+
+    # Moves, clicks, drags and scrolls the mouse and types on the keyboard of a workspace's screen (its X display `:1`), each step in turn as one command, and returns where the mouse is then. It stops at the first step that fails, refused 409 `act_failed` naming it; refused 409 `display_not_running` when no display runs. A paused workspace is resumed first.
+    def act(actions, idempotency_key: nil)
+      @c.act(@info.id, actions: actions, idempotency_key: idempotency_key)
+    end
+
+    # Runs a cell of Python in a workspace as a notebook does, in a Jupyter kernel it keeps running for the cell's `context`: variables, imports and functions stay for the next cell. Returns what it printed, its values and displays (text, HTML, images such as charts), and its exception with its traceback. The context's kernel starts on its first cell. A cell past `timeoutSeconds` is interrupted and its context kept. Refused 409 `kernel_not_installed` when the image has no ipykernel. A paused workspace is resumed first.
+    def run_code(code, language: nil, context: nil, timeout_seconds: nil, idempotency_key: nil)
+      @c.run_code(@info.id, code: code, language: language, context: context, timeout_seconds: timeout_seconds, idempotency_key: idempotency_key)
+    end
+  end
+
+  # A development environment: a machine running VS Code in the browser (code-server) on port 8080 over /workspace, reached at its private preview, as Codespaces and Gitpod give one. It pauses after 30 minutes with nothing happening, its memory kept.
+  class Workspaces
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Creates a workspace. Asked again with the same Idempotency-Key, it returns the same workspace.
+    def create(vcpu: nil, memory_gb: nil, disk_gb: nil, image: nil, secrets: nil, start: nil, user: nil, volumes: nil, run: nil, name: nil, labels: nil, get_or_create: nil, max_cost: nil, idle_pause_seconds: nil, from: nil, snapshot: nil, network: nil, env: nil, auto_wake: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Workspace.new(self, SandboxInfo.from(@transport.request("POST", "/v2/workspaces", body: { "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "image" => image, "secrets" => secrets, "start" => start, "user" => user, "volumes" => volumes, "run" => run, "name" => name, "labels" => labels, "getOrCreate" => get_or_create, "maxCost" => max_cost, "idlePauseSeconds" => idle_pause_seconds, "from" => from, "snapshot" => snapshot, "network" => network, "env" => env, "autoWake" => auto_wake, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true)))
+    end
+
+    # Returns a workspace.
+    def get(id, wait: nil, if_state: nil)
+      Workspace.new(self, SandboxInfo.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true)))
+    end
+
+    # Lists the project's workspaces, newest first.
+    def list(state: nil, name: nil, label: nil, cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/workspaces", query: { "state" => state, "name" => name, "label" => label, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| SandboxInfo.from(i) }
+    end
+
+    # Deletes a workspace, its memory and its disk.
+    def delete(id, idempotency_key: nil)
+      SandboxInfo.from(@transport.request("DELETE", "/v2/workspaces/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
+    end
+
+    # Pauses a workspace with its memory and disk kept. A call to it resumes it.
+    def pause(id, idempotency_key: nil)
+      SandboxInfo.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:pause", idempotency_key: idempotency_key))
+    end
+
+    # Resumes a paused workspace where it was, its memory and processes as they were.
+    def resume(id, idempotency_key: nil)
+      SandboxInfo.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:resume", idempotency_key: idempotency_key))
+    end
+
+    # Runs a command as a process and returns it once it ended, with its output; with wait false, at once, while it runs. A paused workspace is resumed first. Asked again with the same Idempotency-Key, it runs nothing more: it returns the first run's process, waiting for its end while it runs.
+    def exec(id, cmd:, cwd: nil, env: nil, stdin: nil, timeout_seconds: nil, stream: nil, wait: nil, stdin_open: nil, output_encoding: nil, pty: nil, user: nil, idempotency_key: nil)
+      Process.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:exec", body: { "cmd" => cmd, "cwd" => cwd, "env" => env, "stdin" => stdin, "timeoutSeconds" => timeout_seconds, "stream" => stream, "wait" => wait, "stdinOpen" => stdin_open, "outputEncoding" => output_encoding, "pty" => pty, "user" => user }.compact, idempotency_key: idempotency_key, idempotent: true, runs: true, runs_seconds: timeout_seconds))
+    end
+
+    # Returns a file's bytes.
+    def read(id, path:)
+      @transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files", query: { "path" => path }, raw: true, idempotent: true)
+    end
+
+    # Writes the request's bytes to a file as they come, of any size (Content-Length required), its folders made: the file whole when they all came, or as it was. With offset, they are written into it in place.
+    def write(id, data, path:, mode: nil, offset: nil, sha256: nil, idempotency_key: nil)
+      FileWritten.from(@transport.request("PUT", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files", query: { "path" => path, "mode" => mode, "offset" => offset, "sha256" => sha256 }, data: data, idempotency_key: idempotency_key))
+    end
+
+    # Returns a process's output after a cursor, and the cursor to read on from. The latest 1 MiB is kept; truncated says when the cursor fell behind.
+    def process_output(id, process, cursor: nil, wait_seconds: nil, max_bytes: nil, follow: nil)
+      ProcessOutput.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}/output", query: { "cursor" => cursor, "waitSeconds" => wait_seconds, "maxBytes" => max_bytes, "follow" => follow }, idempotent: true))
+    end
+
+    # Sends input to a process started with stdinOpen or a pty, and returns how much of its input it has taken.
+    def write_process(id, process, data: nil, offset: nil, eof: nil, idempotency_key: nil)
+      ProcessWritten.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:write", body: { "data" => data, "offset" => offset, "eof" => eof }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Sends a signal to a process and its group; a process that ended is not signalled, so a retry is safe.
+    def signal_process(id, process, signal: nil, idempotency_key: nil)
+      Process.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:signal", body: { "signal" => signal }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Resizes the terminal of a process started with a pty (its window's columns and rows, which the process is told by SIGWINCH), and returns the process; refused 409 for a process without one. A process that ended is left as it is, so a retry is safe.
+    def resize_process(id, process, cols:, rows:, idempotency_key: nil)
+      Process.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/processes/#{URI.encode_www_form_component(process)}:resize", body: { "cols" => cols, "rows" => rows }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Lists a workspace's processes, newest first: those running and those that ended lately.
+    def list_processes(id)
+      ProcessList.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/processes", idempotent: true))
+    end
+
+    # Removes a file, a link or a directory (recursive for one with contents). One missing is success, removed false.
+    def remove(id, path:, recursive: nil, idempotency_key: nil)
+      FileRemoved.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:remove", body: { "path" => path, "recursive" => recursive }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Returns what is at a path: a file, a directory or a link, or nothing (exists false). With sha256=true, a file's SHA-256 too.
+    def stat(id, path:, sha256: nil)
+      FileInfo.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/stat", query: { "path" => path, "sha256" => sha256 }, idempotent: true))
+    end
+
+    # Lists a directory's entries in path order, to a depth.
+    def list_files(id, path: nil, depth: nil, limit: nil, hidden: nil, glob: nil)
+      FileList.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/list", query: { "path" => path, "depth" => depth, "limit" => limit, "hidden" => hidden, "glob" => glob }, idempotent: true))
+    end
+
+    # Returns a folder as a tar archive (`application/x-tar`, or `application/gzip` with gzip), packed by tar in the workspace as it streams, of any size; its entries are relative to the folder (`./a.txt`). A folder that fails part way (a file it may not read, or one that changes as it is read) ends as an archive every tar reader refuses, never as a short one that reads whole. At most 4 at once in a workspace. A paused workspace is woken first.
+    def download_folder(id, path:, gzip: nil, user: nil, exclude: nil)
+      @transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive", query: { "path" => path, "gzip" => gzip, "user" => user, "exclude" => exclude }, raw: true, idempotent: true)
+    end
+
+    # Unpacks the request's tar archive (gzip-compressed or not, told by its first bytes) into a folder, made with its parents, by tar in the workspace as the bytes arrive, of any size, nothing of it kept on disk but what tar writes; returns once tar has ended, or 400 `invalid_archive` with what tar said. A paused workspace is woken first.
+    def upload_folder(id, data, path:, user: nil, idempotency_key: nil)
+      FolderUnpacked.from(@transport.request("PUT", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive", query: { "path" => path, "user" => user }, data: data, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Begins a folder's upload in parts: tar starts in the workspace, unpacking into the folder each part as it arrives. Send the parts in order by offset (writeFolderUpload), then commitFolderUpload; an upload no call names for 10 minutes is ended. A paused workspace is woken first.
+    def begin_folder_upload(id, path:, gzip: nil, user: nil, idempotency_key: nil)
+      FolderUpload.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive/uploads", body: { "path" => path, "gzip" => gzip, "user" => user }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Sends the request's bytes, a part of the archive at its offset, into tar's input as they arrive, of any size, and returns the bytes received in all once tar took them. A part past them is refused 409 `upload_incomplete`, naming them: send the parts in order.
+    def write_folder_upload(id, upload, data, offset: nil, idempotency_key: nil)
+      FolderUploadReceived.from(@transport.request("PUT", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}", query: { "offset" => offset }, data: data, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Ends a folder upload's input and returns once tar has ended, as an exec returns once its command has: the folder, or 400 `invalid_archive` with what tar said. A front that restarts meanwhile returns 503 `run_goes_on`; sent again, it returns how tar ended. An upload no call has named for 10 minutes since its last part or commit is ended.
+    def commit_folder_upload(id, upload, idempotency_key: nil)
+      FolderUnpacked.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}:commit", idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Stops a folder upload's tar; what it unpacked so far stays.
+    def abort_folder_upload(id, upload, idempotency_key: nil)
+      FolderUploadAborted.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files/archive/uploads/#{URI.encode_www_form_component(upload)}:abort", idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Makes a directory, and its parents unless parents is false. One there already is success, created false.
+    def mkdir(id, path:, parents: nil, idempotency_key: nil)
+      FileMade.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:mkdir", body: { "path" => path, "parents" => parents }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Moves a file, a link or a directory; refused 409 when something is at its new path, unless overwrite. With sha256 or size, a file written in parts is put in place once whole: its writes ended, then only a file of that size with every byte written and whose bytes hash to it moves; refused 409 `upload_incomplete` or `checksum_mismatch`, nothing moved. With sha256, it is safe to send again: once moved, it returns the same answer while `from` is gone and `to` holds those bytes.
+    def rename(id, from:, to:, overwrite: nil, sha256: nil, size: nil, idempotency_key: nil)
+      FileRenamed.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:rename", body: { "from" => from, "to" => to, "overwrite" => overwrite, "sha256" => sha256, "size" => size }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Makes an expiring address for one file that anyone may open with no API key, from a browser, curl or another service: GET downloads it (Range works, so videos play and downloads resume; archive: true downloads a folder as .tar.gz), PUT with the raw body uploads it (up to maxBytes, written whole; Content-Length required). The link acts as the key that made it: an upload link needs write, and the link ends with its key, with revokeLinks or with its workspace. A paused workspace is woken for it unless wake is false.
+    def link(id, path:, method: nil, expires_in_seconds: nil, filename: nil, max_bytes: nil, wake: nil, archive: nil, idempotency_key: nil)
+      FileLink.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:link", body: { "path" => path, "method" => method, "expiresInSeconds" => expires_in_seconds, "filename" => filename, "maxBytes" => max_bytes, "wake" => wake, "archive" => archive }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Ends every file link made for a workspace so far; links made after work.
+    def revoke_links(id, idempotency_key: nil)
+      FileLinksRevoked.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}/files:revokeLinks", idempotency_key: idempotency_key))
+    end
+
+    # Returns where a workspace may connect out.
+    def get_network(id)
+      SandboxNetwork.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/network", idempotent: true))
+    end
+
+    # Returns a workspace's CPU, memory, disks and pressure, as its host reads them from the workspace's own cgroup over a fifth of a second: never a call into the workspace, so it does not wake a paused one nor keep one from its idle pause. One that is not running has no reading.
+    def metrics(id, range: nil)
+      SandboxMetrics.from(@transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/metrics", query: { "range" => range }, idempotent: true))
+    end
+
+    # Replaces where a workspace may connect out, for its next connection and within a second for its open ones: those the new rules refuse are cut.
+    def set_network(id, allow_outbound: nil, deny_outbound: nil, idempotency_key: nil)
+      SandboxNetwork.from(@transport.request("PUT", "/v2/workspaces/#{URI.encode_www_form_component(id)}/network", body: { "allowOutbound" => allow_outbound, "denyOutbound" => deny_outbound }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Copies a workspace as it is now, memory and disk, into `count` copies of its own, each running on its host. Asked again with the same Idempotency-Key, it returns the same copies.
+    def fork(id, count: nil, name: nil, labels: nil, secrets: nil, max_cost: nil, idle_pause_seconds: nil, vcpu: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Forked.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:fork", body: { "count" => count, "name" => name, "labels" => labels, "secrets" => secrets, "maxCost" => max_cost, "idlePauseSeconds" => idle_pause_seconds, "vcpu" => vcpu, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Keeps a workspace's memory and disk as they are now, a snapshot to start workspaces from; with `image`, its disk alone as that image's next version. The workspace runs on. Asked again with the same Idempotency-Key, it returns the same snapshot.
+    def snapshot(id, name: nil, labels: nil, image: nil, start: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Stored.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:snapshot", body: { "name" => name, "labels" => labels, "image" => image, "start" => start, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true))
+    end
+
+    # Changes its name, labels, idle pause, maxCost, autoWake, lifetime, delete protection, environment or sizes; each field left out stays as it is. A lifetime (`deleteAfterSeconds`) sent again before its end moves the end to that many seconds from now; 0 takes it off. A lifetime is refused (409 `delete_protected`) while `deleteProtection` is true. A running one holds a changed environment before this answers (a paused one's at its wake): each process it starts after the answer has it, and its running processes keep the one they started with. Its vCPUs, memory and disk grow while it runs, its commands running on. One paused or stopped is not woken for it: judged at once as a live resize is (past the vCPUs it was made with 409, over its organization's limits `quota_exceeded`), its new sizes are returned at once, and its next wake grows it to them before the call that woke it runs. A smaller size, or a machine starting or failed, is refused 409 naming why, and nothing is changed. With If-Match, made only while its revision is that one, else 412. Sent again with the same Idempotency-Key and body while it is the latest change, it returns the current state and changes nothing; the same key with a different body returns 409 idempotency_key_reused.
+    def update(id, name: nil, labels: nil, idle_pause_seconds: nil, vcpu: nil, memory_gb: nil, disk_gb: nil, user: nil, env: nil, remove_env: nil, max_cost: nil, auto_wake: nil, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      SandboxInfo.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:update", body: { "name" => name, "labels" => labels, "idlePauseSeconds" => idle_pause_seconds, "vcpu" => vcpu, "memoryGB" => memory_gb, "diskGB" => disk_gb, "user" => user, "env" => env, "removeEnv" => remove_env, "maxCost" => max_cost, "autoWake" => auto_wake, "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Returns what a workspace's screen shows now, as `image/png` (or `image/jpeg`): its X display `:1`, whole. Refused 409 `display_not_running` when no display runs. A paused workspace is resumed first.
+    def screenshot(id, format: nil, quality: nil)
+      @transport.request("GET", "/v2/workspaces/#{URI.encode_www_form_component(id)}/screenshot", query: { "format" => format, "quality" => quality }, raw: true, idempotent: true)
+    end
+
+    # Moves, clicks, drags and scrolls the mouse and types on the keyboard of a workspace's screen (its X display `:1`), each step in turn as one command, and returns where the mouse is then. It stops at the first step that fails, refused 409 `act_failed` naming it; refused 409 `display_not_running` when no display runs. A paused workspace is resumed first.
+    def act(id, actions:, idempotency_key: nil)
+      Acted.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:act", body: { "actions" => actions }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Runs a cell of Python in a workspace as a notebook does, in a Jupyter kernel it keeps running for the cell's `context`: variables, imports and functions stay for the next cell. Returns what it printed, its values and displays (text, HTML, images such as charts), and its exception with its traceback. The context's kernel starts on its first cell. A cell past `timeoutSeconds` is interrupted and its context kept. Refused 409 `kernel_not_installed` when the image has no ipykernel. A paused workspace is resumed first.
+    def run_code(id, code:, language: nil, context: nil, timeout_seconds: nil, idempotency_key: nil)
+      CodeRun.from(@transport.request("POST", "/v2/workspaces/#{URI.encode_www_form_component(id)}:runCode", body: { "code" => code, "language" => language, "context" => context, "timeoutSeconds" => timeout_seconds }.compact, idempotency_key: idempotency_key))
     end
   end
 end

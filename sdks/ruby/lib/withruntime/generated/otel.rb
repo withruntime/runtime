@@ -5,90 +5,90 @@ require "uri"
 require_relative "runtime"
 
 module Withruntime
-  module Generated
-    # An OpenTelemetry export to make.
-    # - +endpoint+: The OTLP/HTTP endpoint's base URL (https).
-    # - +headers+: Headers sent with each request (an API key), at most 16.
-    # - +events+: The events to send it; `["*"]` (every one) when omitted.
-    ExportCreate = Struct.new(:endpoint, :headers, :events, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+  # An OpenTelemetry export to make.
+  # - +endpoint+: The OTLP/HTTP endpoint's base URL (https).
+  # - +headers+: Headers sent with each request (an API key), at most 16.
+  # - +events+: The events to send it; `["*"]` (every one) when omitted.
+  ExportCreate = Struct.new(:endpoint, :headers, :events, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-        new(
-          endpoint: h["endpoint"],
-          headers: h["headers"],
-          events: h["events"],
-        )
-      end
-
-      def to_wire
-        {
-          "endpoint" => self.endpoint,
-          "headers" => self.headers,
-          "events" => self.events,
-        }.compact
-      end
+      new(
+        endpoint: h["endpoint"],
+        headers: h["headers"],
+        events: h["events"],
+      )
     end
 
-    # An OpenTelemetry export: the events as OTLP logs, POSTed to `<endpoint>/v1/logs`.
-    # - +id+: Its ID.
-    # - +object+: Always `otel`.
-    # - +endpoint+: The OTLP/HTTP endpoint's base URL (https); in a list, its origin alone.
-    # - +header_names+: The names of the headers sent with each request; their values are never shown.
-    # - +events+: The events it is sent; `*` for every one.
-    # - +state+: `active` while it is sent to; `deleted` once deleted: a delete's answer.
-    # - +created_at+: When it was made.
-    # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
-    Export = Struct.new(:id, :object, :endpoint, :header_names, :events, :state, :created_at, :deleted_at, keyword_init: true) do
-      def self.from(h)
-        return nil if h.nil?
+    def to_wire
+      {
+        "endpoint" => self.endpoint,
+        "headers" => self.headers,
+        "events" => self.events,
+      }.compact
+    end
+  end
 
-        new(
-          id: h["id"],
-          object: h["object"],
-          endpoint: h["endpoint"],
-          header_names: h["headerNames"],
-          events: h["events"],
-          state: h["state"],
-          created_at: h["createdAt"],
-          deleted_at: h["deletedAt"],
-        )
-      end
+  # An OpenTelemetry export: the events as OTLP logs, POSTed to `<endpoint>/v1/logs`.
+  # - +id+: Its ID.
+  # - +object+: Always `otel`.
+  # - +endpoint+: The OTLP/HTTP endpoint's base URL (https); in a list, its origin alone.
+  # - +header_names+: The names of the headers sent with each request; their values are never shown.
+  # - +events+: The events it is sent; `*` for every one.
+  # - +state+: `active` while it is sent to; `deleted` once deleted: a delete's answer.
+  # - +created_at+: When it was made.
+  # - +deleted_at+: When it was deleted: a delete's answer, its state `deleted`.
+  Export = Struct.new(:id, :object, :endpoint, :header_names, :events, :state, :created_at, :deleted_at, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      def to_wire
-        {
-          "id" => self.id,
-          "object" => self.object,
-          "endpoint" => self.endpoint,
-          "headerNames" => self.header_names,
-          "events" => self.events,
-          "state" => self.state,
-          "createdAt" => self.created_at,
-          "deletedAt" => self.deleted_at,
-        }.compact
-      end
+      new(
+        id: h["id"],
+        object: h["object"],
+        endpoint: h["endpoint"],
+        header_names: h["headerNames"],
+        events: h["events"],
+        state: h["state"],
+        created_at: h["createdAt"],
+        deleted_at: h["deletedAt"],
+      )
     end
 
-    # The org's events as OpenTelemetry logs, sent to your OTLP/HTTP endpoint.
-    class Otel
-      def initialize(transport)
-        @transport = transport
-      end
+    def to_wire
+      {
+        "id" => self.id,
+        "object" => self.object,
+        "endpoint" => self.endpoint,
+        "headerNames" => self.header_names,
+        "events" => self.events,
+        "state" => self.state,
+        "createdAt" => self.created_at,
+        "deletedAt" => self.deleted_at,
+      }.compact
+    end
+  end
 
-      # Makes an OpenTelemetry export.
-      def create(endpoint:, headers: nil, events: nil, idempotency_key: nil)
-        Export.from(@transport.request("POST", "/v2/otel", body: { "endpoint" => endpoint, "headers" => headers, "events" => events }.compact, idempotency_key: idempotency_key))
-      end
+  # The org's events as OpenTelemetry logs, sent to your OTLP/HTTP endpoint.
+  class Otel
+    attr_reader :transport
 
-      # Lists the org's, oldest first.
-      def list(cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/otel", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Export.from(i) }
-      end
+    def initialize(transport)
+      @transport = transport
+    end
 
-      # Deletes it: nothing more is sent to it.
-      def delete(id, idempotency_key: nil)
-        Export.from(@transport.request("DELETE", "/v2/otel/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
-      end
+    # Makes an OpenTelemetry export.
+    def create(endpoint:, headers: nil, events: nil, idempotency_key: nil)
+      Export.from(@transport.request("POST", "/v2/otel", body: { "endpoint" => endpoint, "headers" => headers, "events" => events }.compact, idempotency_key: idempotency_key))
+    end
+
+    # Lists the org's, oldest first.
+    def list(cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/otel", query: { "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Export.from(i) }
+    end
+
+    # Deletes it: nothing more is sent to it.
+    def delete(id, idempotency_key: nil)
+      Export.from(@transport.request("DELETE", "/v2/otel/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

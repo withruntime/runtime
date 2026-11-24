@@ -46,13 +46,13 @@ export type AuditLineListQuery = {
 
 /** The organization's audit log: every write and every refused call, with who asked, from where, and what it committed. On the Scale and Enterprise plans. */
 export class Audit {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Lists the organization's audit log, newest first, paginated: each write and each refused call, over the days the plan keeps (365 on Scale). On other plans it returns 403. */
-  list(query: AuditLineListQuery = {}, options?: RequestOptions): Paginated<AuditLine> {
-    return new Paginated<AuditLine>((cursor) => this.#t.request<Page<AuditLine>>("GET", `/v2/audit`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: AuditLineListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<AuditLine> {
+    return new Paginated<AuditLine>((cursor) => this.transport.request<Page<AuditLine>>("GET", `/v2/audit`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 }

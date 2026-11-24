@@ -77,6 +77,25 @@ func (q JobRunListQuery) values() url.Values {
 	return v
 }
 
+// JobRunGetQuery is what Get takes in its query.
+type JobRunGetQuery struct {
+	// Wait Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60.
+	Wait *float64
+	// IfState The state the caller last read, which `wait` waits for it to leave.
+	IfState *string
+}
+
+func (q JobRunGetQuery) values() url.Values {
+	v := url.Values{}
+	if q.Wait != nil {
+		v.Set("wait", strconv.FormatFloat(*q.Wait, 'f', -1, 64))
+	}
+	if q.IfState != nil {
+		v.Set("ifState", *q.IfState)
+	}
+	return v
+}
+
 // JobRunOutputQuery is what Output takes in its query.
 type JobRunOutputQuery struct {
 	// Cursor Output after this byte. At least 0. Default: 0.
@@ -110,18 +129,18 @@ func (c *JobRuns) List(ctx context.Context, q JobRunListQuery, opts *RequestOpti
 	return out, nil
 }
 
-// ListAll is every item of every page List reads, each page read as the last is used up.
+// ListAll is every item of every page List reads from q.Cursor (none: the first page), each page read as the last is used up.
 func (c *JobRuns) ListAll(ctx context.Context, q JobRunListQuery, opts *RequestOptions) iter.Seq2[JobRun, error] {
-	return all(func(cursor *string) (*Page[JobRun], error) {
+	return all(q.Cursor, func(cursor *string) (*Page[JobRun], error) {
 		q.Cursor = cursor
 		return c.List(ctx, q, opts)
 	})
 }
 
 // Get Returns a run.
-func (c *JobRuns) Get(ctx context.Context, id string, opts *RequestOptions) (*JobRun, error) {
+func (c *JobRuns) Get(ctx context.Context, id string, q JobRunGetQuery, opts *RequestOptions) (*JobRun, error) {
 	out := new(JobRun)
-	if err := c.t.Do(ctx, "GET", "/v2/job-runs/"+url.PathEscape(id), nil, nil, Call{Idempotent: true}, opts, out); err != nil {
+	if err := c.t.Do(ctx, "GET", "/v2/job-runs/"+url.PathEscape(id), q.values(), nil, Call{Idempotent: true}, opts, out); err != nil {
 		return nil, err
 	}
 	return out, nil

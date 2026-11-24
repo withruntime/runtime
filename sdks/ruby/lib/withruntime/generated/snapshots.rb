@@ -6,27 +6,170 @@ require_relative "runtime"
 require_relative "sandboxes"
 
 module Withruntime
-  module Generated
-    # A sandbox's memory and disk as they were, kept to start new sandboxes from.
-    class Snapshots
-      def initialize(transport)
-        @transport = transport
-      end
+  # A change to a snapshot, an image version or a volume: each field left out stays as it is.
+  # - +delete_after_seconds+: Seconds from now until Runtime deletes it, as its delete does: final, and it can't be undone. Sent again before then, it renews it; 0 takes its end off (kept until deleted). At least 0. At most 315360000.
+  # - +delete_protection+: true refuses its delete (409 `delete_protected`) until an update sends false. Not while it has a `deleteAt`, unless the same update sends `deleteAfterSeconds` 0.
+  StoredUpdate = Struct.new(:delete_after_seconds, :delete_protection, keyword_init: true) do
+    def self.from(h)
+      return nil if h.nil?
 
-      # Lists the project's snapshots, newest first.
-      def list(name: nil, state: nil, label: nil, sandbox: nil, cursor: nil, limit: nil)
-        Generated.page(@transport.request("GET", "/v2/snapshots", query: { "name" => name, "state" => state, "label" => label, "sandbox" => sandbox, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Stored.from(i) }
-      end
+      new(
+        delete_after_seconds: h["deleteAfterSeconds"],
+        delete_protection: h["deleteProtection"],
+      )
+    end
 
-      # Returns a snapshot.
-      def get(id)
-        Stored.from(@transport.request("GET", "/v2/snapshots/#{URI.encode_www_form_component(id)}", idempotent: true))
-      end
+    def to_wire
+      {
+        "deleteAfterSeconds" => self.delete_after_seconds,
+        "deleteProtection" => self.delete_protection,
+      }.compact
+    end
+  end
 
-      # Deletes a snapshot, its memory and its disk.
-      def delete(id, idempotency_key: nil)
-        Stored.from(@transport.request("DELETE", "/v2/snapshots/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
-      end
+  # One of snapshots: A machine's memory and disk as they were, kept to start new machines from.
+  class Snapshot
+    # What it was when last read, and what is under it.
+    attr_reader :info
+
+    def initialize(client, info)
+      @c = client
+      @info = info
+    end
+
+    # Its id.
+    def id
+      @info.id
+    end
+
+    # Its kind: `snapshot`, `image` or `volume`.
+    def object
+      @info.object
+    end
+
+    # Its name, unique in its project among its kind.
+    def name
+      @info.name
+    end
+
+    # Where it is.
+    def state
+      @info.state
+    end
+
+    # Its labels.
+    def labels
+      @info.labels
+    end
+
+    # What it was made to hold, in bytes.
+    def size_bytes
+      @info.size_bytes
+    end
+
+    # What it holds now, in bytes.
+    def stored_bytes
+      @info.stored_bytes
+    end
+
+    # What it was made from (a snapshot's machine, an image's base), if anything.
+    def parent_id
+      @info.parent_id
+    end
+
+    # The machine it is attached to now, if any.
+    def attached_to
+      @info.attached_to
+    end
+
+    # When it was made.
+    def created_at
+      @info.created_at
+    end
+
+    # An image's version of its name: each build or keep of a name is its next.
+    def version
+      @info.version
+    end
+
+    # An image's tags, each `name:tag`.
+    def tags
+      @info.tags
+    end
+
+    # Why an image's build failed.
+    def error
+      @info.error
+    end
+
+    # When it was deleted: a delete's answer, its state `deleted`.
+    def deleted_at
+      @info.deleted_at
+    end
+
+    # When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted.
+    def delete_at
+      @info.delete_at
+    end
+
+    # Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does.
+    def delete_waits_for
+      @info.delete_waits_for
+    end
+
+    # Whether its delete is refused (409 `delete_protected`) until an update turns this off.
+    def delete_protection
+      @info.delete_protection
+    end
+
+    def inspect
+      "#<Snapshot #{@info.inspect}>"
+    end
+
+    # Returns a snapshot.
+    def refresh(wait: nil, if_state: nil)
+      @info = @c.get(@info.id, wait: wait, if_state: if_state).info
+      self
+    end
+
+    # Deletes a snapshot, its memory and its disk.
+    def delete(idempotency_key: nil)
+      @c.delete(@info.id, idempotency_key: idempotency_key)
+    end
+
+    # Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+    def update(delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      @info = @c.update(@info.id, delete_after_seconds: delete_after_seconds, delete_protection: delete_protection, idempotency_key: idempotency_key)
+      self
+    end
+  end
+
+  # A machine's memory and disk as they were, kept to start new machines from.
+  class Snapshots
+    attr_reader :transport
+
+    def initialize(transport)
+      @transport = transport
+    end
+
+    # Lists the project's snapshots, newest first.
+    def list(name: nil, state: nil, label: nil, sandbox: nil, cursor: nil, limit: nil)
+      Withruntime.page(@transport.request("GET", "/v2/snapshots", query: { "name" => name, "state" => state, "label" => label, "sandbox" => sandbox, "cursor" => cursor, "limit" => limit }, idempotent: true)) { |i| Stored.from(i) }
+    end
+
+    # Returns a snapshot.
+    def get(id, wait: nil, if_state: nil)
+      Snapshot.new(self, Stored.from(@transport.request("GET", "/v2/snapshots/#{URI.encode_www_form_component(id)}", query: { "wait" => wait, "ifState" => if_state }, idempotent: true)))
+    end
+
+    # Deletes a snapshot, its memory and its disk.
+    def delete(id, idempotency_key: nil)
+      Stored.from(@transport.request("DELETE", "/v2/snapshots/#{URI.encode_www_form_component(id)}", idempotency_key: idempotency_key))
+    end
+
+    # Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is.
+    def update(id, delete_after_seconds: nil, delete_protection: nil, idempotency_key: nil)
+      Stored.from(@transport.request("POST", "/v2/snapshots/#{URI.encode_www_form_component(id)}:update", body: { "deleteAfterSeconds" => delete_after_seconds, "deleteProtection" => delete_protection }.compact, idempotency_key: idempotency_key, idempotent: true))
     end
   end
 end

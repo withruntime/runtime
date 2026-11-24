@@ -5,6 +5,14 @@ import type { Page, RequestOptions, Transport } from "./runtime.js";
 import { Paginated } from "./runtime.js";
 import type { Stored } from "./sandboxes.js";
 
+/** A change to a snapshot, an image version or a volume: each field left out stays as it is. */
+export interface StoredUpdate {
+  /** Seconds from now until Runtime deletes it, as its delete does: final, and it can't be undone. Sent again before then, it renews it; 0 takes its end off (kept until deleted). At least 0. At most 315360000. */
+  deleteAfterSeconds?: number;
+  /** true refuses its delete (409 `delete_protected`) until an update sends false. Not while it has a `deleteAt`, unless the same update sends `deleteAfterSeconds` 0. */
+  deleteProtection?: boolean;
+}
+
 /** What list takes in its query. */
 export type SnapshotListQuery = {
   /** Only those of this name. */
@@ -13,31 +21,163 @@ export type SnapshotListQuery = {
   state?: string;
   /** Only those with every label given (repeat it for several): key:value, or a key for any value. */
   label?: string[];
-  /** Only those taken of this sandbox (or other machine), by its ID; a deleted one's snapshots too. */
+  /** Only those taken of this machine, by its ID; a deleted one's snapshots too. */
   sandbox?: string;
   /** The most items the page holds. At least 1. At most 200. Default: 50. */
   limit?: number;
 };
 
-/** A sandbox's memory and disk as they were, kept to start new sandboxes from. */
-export class Snapshots {
-  readonly #t: Transport;
-  constructor(transport: Transport) {
-    this.#t = transport;
+/** What get takes in its query. */
+export type SnapshotGetQuery = {
+  /** Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. */
+  wait?: number;
+  /** The state the caller last read, which `wait` waits for it to leave. */
+  ifState?: string;
+};
+
+/** One of snapshots: A machine's memory and disk as they were, kept to start new machines from. */
+export class Snapshot {
+  readonly #c: Snapshots;
+  /** What it was when last read. */
+  info: Stored;
+
+  constructor(client: Snapshots, info: Stored) {
+    this.#c = client;
+    this.info = info;
   }
 
-  /** Lists the project's snapshots, newest first. */
-  list(query: SnapshotListQuery = {}, options?: RequestOptions): Paginated<Stored> {
-    return new Paginated<Stored>((cursor) => this.#t.request<Page<Stored>>("GET", `/v2/snapshots`, { query: { ...query, cursor }, options, idempotent: true }));
+  /** Its id. */
+  get id(): string {
+    return this.info.id;
+  }
+
+  /** Its kind: `snapshot`, `image` or `volume`. */
+  get object(): "snapshot" | "image" | "volume" | (string & {}) {
+    return this.info.object;
+  }
+
+  /** Its name, unique in its project among its kind. */
+  get name(): string | undefined {
+    return this.info.name;
+  }
+
+  /** Where it is. */
+  get state(): "making" | "ready" | "failed" | "deleted" | (string & {}) {
+    return this.info.state;
+  }
+
+  /** Its labels. */
+  get labels(): Record<string, string> {
+    return this.info.labels;
+  }
+
+  /** What it was made to hold, in bytes. */
+  get sizeBytes(): number {
+    return this.info.sizeBytes;
+  }
+
+  /** What it holds now, in bytes. */
+  get storedBytes(): number {
+    return this.info.storedBytes;
+  }
+
+  /** What it was made from (a snapshot's machine, an image's base), if anything. */
+  get parentId(): string | undefined {
+    return this.info.parentId;
+  }
+
+  /** The machine it is attached to now, if any. */
+  get attachedTo(): string | undefined {
+    return this.info.attachedTo;
+  }
+
+  /** When it was made. */
+  get createdAt(): string | undefined {
+    return this.info.createdAt;
+  }
+
+  /** An image's version of its name: each build or keep of a name is its next. */
+  get version(): number | undefined {
+    return this.info.version;
+  }
+
+  /** An image's tags, each `name:tag`. */
+  get tags(): string[] | undefined {
+    return this.info.tags;
+  }
+
+  /** Why an image's build failed. */
+  get error(): string | undefined {
+    return this.info.error;
+  }
+
+  /** When it was deleted: a delete's answer, its state `deleted`. */
+  get deletedAt(): string | undefined {
+    return this.info.deletedAt;
+  }
+
+  /** When Runtime deletes it (`deleteAfterSeconds`), finally: it can't be undone, as its delete can't; none: kept until deleted. */
+  get deleteAt(): string | undefined {
+    return this.info.deleteAt;
+  }
+
+  /** Once `deleteAt` has passed, what its delete waits for: the App that boots this image, or the machine this volume is attached to, by its ID. It is deleted as soon as that one no longer does. */
+  get deleteWaitsFor(): string | undefined {
+    return this.info.deleteWaitsFor;
+  }
+
+  /** Whether its delete is refused (409 `delete_protected`) until an update turns this off. */
+  get deleteProtection(): boolean | undefined {
+    return this.info.deleteProtection;
   }
 
   /** Returns a snapshot. */
-  get(id: string, options?: RequestOptions): Promise<Stored> {
-    return this.#t.request<Stored>("GET", `/v2/snapshots/${encodeURIComponent(id)}`, { options, idempotent: true });
+  async refresh(query: SnapshotGetQuery & RequestOptions = {}, options?: RequestOptions): Promise<this> {
+    this.info = (await this.#c.get(this.id, query, options)).info;
+    return this;
+  }
+
+  /** Deletes a snapshot, its memory and its disk. */
+  delete(options?: RequestOptions): Promise<Stored> {
+    return this.#c.delete(this.id, options);
+  }
+
+  /** Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is. */
+  async update(input: StoredUpdate = {}, options?: RequestOptions): Promise<this> {
+    this.info = await this.#c.update(this.id, input, options);
+    return this;
+  }
+
+  /** Deletes it when the `await using` block that holds it ends. */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.delete();
+  }
+}
+
+/** A machine's memory and disk as they were, kept to start new machines from. */
+export class Snapshots {
+  readonly transport: Transport;
+  constructor(transport: Transport) {
+    this.transport = transport;
+  }
+
+  /** Lists the project's snapshots, newest first. */
+  list(query: SnapshotListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Stored> {
+    return new Paginated<Stored>((cursor) => this.transport.request<Page<Stored>>("GET", `/v2/snapshots`, { query: { ...query, cursor }, options, idempotent: true }));
+  }
+
+  /** Returns a snapshot. */
+  async get(id: string, query: SnapshotGetQuery & RequestOptions = {}, options?: RequestOptions): Promise<Snapshot> {
+    return new Snapshot(this, await this.transport.request<Stored>("GET", `/v2/snapshots/${encodeURIComponent(id)}`, { query: { ...query }, options, idempotent: true }));
   }
 
   /** Deletes a snapshot, its memory and its disk. */
   delete(id: string, options?: RequestOptions): Promise<Stored> {
-    return this.#t.request<Stored>("DELETE", `/v2/snapshots/${encodeURIComponent(id)}`, { options });
+    return this.transport.request<Stored>("DELETE", `/v2/snapshots/${encodeURIComponent(id)}`, { options });
+  }
+
+  /** Changes its lifetime (`deleteAfterSeconds`) or delete protection (`deleteProtection`). A lifetime sent again before its end moves the end to that many seconds from now; 0 takes it off. At its end Runtime deletes it as its delete does: final, and it can't be undone. A lifetime and protection are never set together (409 `delete_protected`). Each field left out stays as it is. */
+  update(id: string, input: StoredUpdate = {}, options?: RequestOptions): Promise<Stored> {
+    return this.transport.request<Stored>("POST", `/v2/snapshots/${encodeURIComponent(id)}:update`, { body: input, options, idempotent: true });
   }
 }

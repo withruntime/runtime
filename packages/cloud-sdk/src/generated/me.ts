@@ -26,19 +26,19 @@ export interface Me {
   role?: string;
   /** What a call that names no resource reaches: `org` (the whole organization) or `project` (the key's project alone). */
   scope: "org" | "project" | (string & {});
-  /** How the organization pays: `test` (no card yet: every call is answered, and nothing runs or is billed), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted). */
+  /** How the organization pays: `test` (no card yet: every call that creates or changes a machine, volume or address answers 402 `card_required`), `trial`, `live`, `grace` (a payment is due; work runs until it pauses) or `paused` (work paused until paid; nothing deleted). */
   billing?: "test" | "trial" | "live" | "grace" | "paused" | (string & {});
 }
 
 /** Who is calling: the key, the organization it acts for, its project, and the role that admits it. */
 export class MeClient {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Returns who the key is: the agent it acts as, its organization, plan, project and the role that admits it. */
   get(options?: RequestOptions): Promise<Me> {
-    return this.#t.request<Me>("GET", `/v2/me`, { options, idempotent: true });
+    return this.transport.request<Me>("GET", `/v2/me`, { options, idempotent: true });
   }
 }

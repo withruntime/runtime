@@ -33,11 +33,24 @@ export async function serveMcp(baseUrl: string, fetcher: typeof fetch = fetch): 
       });
       if (res.status === 202) continue;
       const text = await res.text();
+      let body: unknown;
       try {
-        write(JSON.parse(text));
+        body = JSON.parse(text);
       } catch {
         write({ jsonrpc: "2.0", id, error: { code: -32603, message: `The API answered ${res.status}: ${text.slice(0, 200)}` } });
+        continue;
       }
+      if (res.ok) {
+        write(body);
+        continue;
+      }
+      // A refusal of the call itself (no key, a bad key, a limit) is the API's error body, not a JSON-RPC answer: the
+      // client is told it as this request's error, or it waits for an answer that never comes.
+      const api = (body as { error?: { code?: string; message?: string; hint?: string } }).error;
+      const message = !key && res.status === 401
+        ? "No API key. Set RUNTIME_API_KEY, or run `npx withruntime login` once on this machine."
+        : `${api?.code ?? res.status}: ${api?.message ?? text.slice(0, 200)}${api?.hint ? ` ${api.hint}` : ""}`;
+      write({ jsonrpc: "2.0", id, error: { code: -32001, message, data: { status: res.status, ...api } } });
     } catch (e) {
       write({ jsonrpc: "2.0", id, error: { code: -32603, message: `The API did not answer: ${(e as Error).message}` } });
     }

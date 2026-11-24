@@ -58,8 +58,8 @@ result = runtime.secrets.list()
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.secrets.list
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.secrets.list
 ```
 
 ```bash title="CLI"
@@ -75,6 +75,13 @@ Returns a secret, without its value.
 Its action, for a key's grant: `secrets:get`.
 
 Path: `name`.
+
+Query:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `wait` | number | No | Seconds to wait, at most 60, for its state to differ from `ifState`; it answers once it does, or as it is when the wait ends. At least 0. At most 60. |
+| `ifState` | string | No | The state the caller last read, which `wait` waits for it to leave. |
 
 Returns a [Secret](#secret).
 
@@ -104,8 +111,8 @@ result = runtime.secrets.get("example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.secrets.get("example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.secrets.get("example")
 ```
 
 ```bash title="CLI"
@@ -154,8 +161,8 @@ result = runtime.secrets.set("example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.secrets.set("example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.secrets.set("example")
 ```
 
 ```bash title="CLI"
@@ -200,8 +207,8 @@ result = runtime.secrets.delete("example")
 ```ruby title="Ruby"
 require "withruntime"
 
-kit = Withruntime::Generated::Kit.new # RUNTIME_API_KEY from the environment
-result = kit.secrets.delete("example")
+runtime = Withruntime::Runtime.new # RUNTIME_API_KEY from the environment
+result = runtime.secrets.delete("example")
 ```
 
 ```bash title="CLI"
@@ -216,7 +223,8 @@ Which machines may use a secret.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `labelsAny` | list of object of strings | Yes | Machines with every label of any one of these sets. |
+| `labelsAny` | list of object of strings | No | Machines with every label of any one of these sets. Give this or `none`. |
+| `none` | boolean | No | `true`: no machine. Runtime alone uses the secret: it is in no machine's requests or environment. A registry login an image import pulls with (`pullSecret`) has this scope. Give this or `labelsAny`. |
 
 ### SecretRule
 
@@ -311,5 +319,5 @@ A secret to store or replace, or, without its value, to change.
 | `envName` | string | No | The environment variable that holds its placeholder (or, when visible, its value) in each machine it reaches; its name when omitted. When two secrets that reach one machine name the same variable, it holds the one first by name. |
 | `scope` | [SecretScope](#secretscope) | No | The machines that may use it; every machine of the organization when omitted. |
 | `policies` | [SecretPolicies](#secretpolicies) | No | How it may be used. Hidden secrets only. |
-| `value` | string | No | Its value, never answered. Hidden: 1 to 8192 visible ASCII characters and spaces, one line, since it goes into an HTTP header. Visible: 1 byte to 64 KiB of UTF-8 text with no NUL, newlines included (a PEM file, an SSH key, a service account's JSON). With it, the set stores the secret whole, as its fields say. Without it, the set changes only the hosts, `policies.rules` and scope it names, and keeps the rest: hosts and rules only narrow, since widening needs the value, and so does a visible secret's scope, whose machines hold its value; any other field is refused 400. |
+| `value` | string, never answered (the CLI reads it from standard input or `--from-file`) | No | Its value, never answered. Hidden: 1 to 8192 visible ASCII characters and spaces, one line, since it goes into an HTTP header. Visible: 1 byte to 64 KiB of UTF-8 text with no NUL, newlines included (a PEM file, an SSH key, a service account's JSON). With it, the set stores the secret whole, as its fields say. Without it, the set changes only the hosts, `policies.rules` and scope it names, and keeps the rest: hosts and rules only narrow, since widening needs the value, and so does a visible secret's scope, whose machines hold its value; any other field is refused 400. |
 | `expectedVersion` | integer | No | Replaced only from this version; 409 otherwise. |

@@ -40,23 +40,23 @@ export type WebhookListQuery = {
 
 /** A signed POST to your URL for each event it names. */
 export class Webhooks {
-  readonly #t: Transport;
+  readonly transport: Transport;
   constructor(transport: Transport) {
-    this.#t = transport;
+    this.transport = transport;
   }
 
   /** Makes a webhook, returning its signing secret this once. */
   create(input: WebhookCreate, options?: RequestOptions): Promise<Webhook> {
-    return this.#t.request<Webhook>("POST", `/v2/webhooks`, { body: input, options });
+    return this.transport.request<Webhook>("POST", `/v2/webhooks`, { body: input, options });
   }
 
   /** Lists the org's, oldest first. */
-  list(query: WebhookListQuery = {}, options?: RequestOptions): Paginated<Webhook> {
-    return new Paginated<Webhook>((cursor) => this.#t.request<Page<Webhook>>("GET", `/v2/webhooks`, { query: { ...query, cursor }, options, idempotent: true }));
+  list(query: WebhookListQuery & RequestOptions = {}, options?: RequestOptions): Paginated<Webhook> {
+    return new Paginated<Webhook>((cursor) => this.transport.request<Page<Webhook>>("GET", `/v2/webhooks`, { query: { ...query, cursor }, options, idempotent: true }));
   }
 
   /** Deletes it: nothing more is sent to it. */
   delete(id: string, options?: RequestOptions): Promise<Webhook> {
-    return this.#t.request<Webhook>("DELETE", `/v2/webhooks/${encodeURIComponent(id)}`, { options, idempotent: true });
+    return this.transport.request<Webhook>("DELETE", `/v2/webhooks/${encodeURIComponent(id)}`, { options, idempotent: true });
   }
 }

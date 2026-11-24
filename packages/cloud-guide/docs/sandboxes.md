@@ -8,11 +8,11 @@ A sandbox is a Linux machine of your own: a Firecracker microVM with its own ker
 
 | Field | What it sets |
 | --- | --- |
-| [`vcpu`](./reference/sandboxes#sandboxcreate) | Its vCPUs. |
-| [`memoryGB`](./reference/sandboxes#sandboxcreate) | Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). |
-| [`diskGB`](./reference/sandboxes#sandboxcreate) | Its disk in GB (1 GB is 1,024 MiB), to the MiB. |
+| [`vcpu`](./reference/sandboxes#sandboxcreate) | Its vCPUs; its product's default when omitted. |
+| [`memoryGB`](./reference/sandboxes#sandboxcreate) | Its memory in GB (1 GB is 1,024 MiB); a fraction is taken to the MiB (`1.5`). Its product's default when omitted. |
+| [`diskGB`](./reference/sandboxes#sandboxcreate) | Its disk in GB (1 GB is 1,024 MiB), to the MiB. When omitted, its product's default or its image's size, whichever is larger. |
 | [`image`](./reference/sandboxes#sandboxcreate) | The image it boots, by name (its newest version), `name:version` or ID; Runtime's default image when omitted. |
-| [`snapshot`](./reference/sandboxes#sandboxcreate) | A snapshot it starts as: a copy of it running, at its sizes, in its project, with its secrets. |
+| [`from`](./reference/sandboxes#sandboxcreate) | What it starts as, by ID or name: a snapshot (a copy of it running, at its sizes, in its project, with its secrets) or an image (as `image` takes it). A name is a snapshot's when the project has one of that name, else an image's. Not with `image`. Running copies of a sandbox are `fork`'s. |
 | [`name`](./reference/sandboxes#sandboxcreate) | Its name, unique in its project. |
 | [`labels`](./reference/sandboxes#sandboxcreate) | Labels to find it by. |
 | [`secrets`](./reference/sandboxes#sandboxcreate) | The secrets it may get, by name, at most 64: only those of them whose scope admits it; [] none; every one whose scope admits it when omitted. A name with no secret yet takes effect once that secret is created. Fixed for its life: a fork or a copy of a snapshot keeps it. |
@@ -30,7 +30,7 @@ The default image is a Linux system with Python and Node.js. Commands run as the
 
 ## What it costs
 
-A running sandbox is billed for the CPU it uses, $0.03 per busy vCPU-hour, at least 0.1 vCPU while it runs, and for the memory it holds, $0.008 per GB-hour. Its disk is $0.10 per GB-month while it runs. A paused sandbox is billed only for what it stores, $0.18 per GB-month. See [pricing](./pricing).
+A running sandbox is billed for the CPU it uses, $0.03 per active vCPU-hour, at least 0.1 vCPU while it runs, and for the memory it holds, $0.008 per GiB-hour. Its disk is $0.10 per GiB-month while it runs. A paused sandbox is billed only for what it stores, $0.18 per GiB-month. See [pricing](./pricing).
 
 ## Find your sandboxes
 
