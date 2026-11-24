@@ -67,11 +67,11 @@ tree() {
     "./cloudflare": { "types": "./dist/v2/shims/cloudflare.d.ts", "default": "./dist/v2/shims/cloudflare.js" },
     "./fly": { "types": "./dist/v2/shims/fly.d.ts", "default": "./dist/v2/shims/fly.js" }
   },
-  "bin": { "runtime": "dist/v2/cli.js", "withruntime": "dist/v2/cli.js" },
+  "bin": { "runtime": "dist/v2/bin.js", "withruntime": "dist/v2/bin.js" },
   "files": ["dist", "LICENSE", "README.md", "CHANGELOG.md"],
   "keywords": ["sandbox", "cloud", "agents", "ai-agents", "microvm", "firecracker", "code-execution", "code-interpreter", "mcp", "browser", "desktop", "jupyter", "ci", "serverless", "containers"],
   "scripts": {
-    "build": "tsc -p tsconfig.json && chmod +x dist/v2/cli.js && cp openapi.json dist/v2/openapi.json"
+    "build": "tsc -p tsconfig.json && chmod +x dist/v2/bin.js && cp openapi.json dist/v2/openapi.json"
   },
   "devDependencies": { "typescript": "5.9.3", "@types/node": "22.15.0" },
   "engines": { "node": ">=22.12" },

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "withruntime"
-version = "1.1.0"
+version = "1.0.0"
 description = "Runtime Cloud: Linux sandboxes for agents. The typed client for every verb of the API."
 readme = "README.md"
 keywords = ["sandbox", "cloud", "agents", "microvm", "firecracker", "code-execution", "mcp", "browser", "desktop", "jupyter"]

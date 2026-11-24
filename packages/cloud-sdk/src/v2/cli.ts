@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /* `runtime`: every verb and shortcut the API serves, as commands read from
    its own description (./table.ts). Nothing here names a product: parsing
    argv into a verb's arguments, printing its answer, and the primitives a
@@ -408,20 +407,4 @@ export async function main(argv: string[]): Promise<number> {
     );
     return 1;
   }
-}
-
-if (
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("/runtime") ||
-  process.argv[1]?.endsWith("/cli.js")
-) {
-  // exitCode, never exit(): a pipe's stdout on macOS is written after the call returns, and exit() cut --help at 64 KiB.
-  // A reader that closed its end (`runtime ... | head`) has all it wanted.
-  process.stdout.on("error", (e: NodeJS.ErrnoException) => {
-    if (e.code !== "EPIPE") throw e;
-    process.exit(process.exitCode ?? 0);
-  });
-  void main(process.argv.slice(2)).then((code) => {
-    process.exitCode = code;
-  });
 }

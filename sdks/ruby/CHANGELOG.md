@@ -4,6 +4,14 @@ Every release of the Runtime Cloud SDKs: npm `withruntime`, PyPI `withruntime`, 
 module `withruntime.com/go`. Versions follow [Semantic Versioning](https://semver.org). Each release is generated from
 the API's OpenAPI description, `https://api.withruntime.com/v2/openapi.json`.
 
+## 1.1.1 (24 November 2026), npm
+
+### Fixed
+
+- `npx withruntime <command>` runs the command. In 1.0.0 and 1.1.0 it exited at once with no output, because the CLI
+  ran only when started under the name `runtime`; `npx withruntime login`, `npx withruntime mcp` and every other
+  command did nothing. The `runtime` command was not affected.
+
 ## 1.1.0 (24 November 2026), and Go v2.0.0
 
 npm, PyPI and RubyGems `withruntime` 1.1.0. The Go module moves to `withruntime.com/go/v2` at v2.0.0: import

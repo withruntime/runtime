@@ -3,4 +3,4 @@
 package withruntime
 
 // Version is this module's release.
-const Version = "2.0.0"
+const Version = "1.0.0"
