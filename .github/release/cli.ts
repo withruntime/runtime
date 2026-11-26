@@ -30,7 +30,7 @@ import {
   waitsForFirstUpload,
 } from "./registries.ts";
 import { PKGS, type Pkg, SEMVER, readVersion, withVersion } from "./versions.ts";
-import { checkDispatch, fromTag } from "./verify-record.ts";
+import { builderKey, checkDispatch, fromTag } from "./verify-record.ts";
 
 const read = (path: string) => {
   try {
@@ -55,6 +55,11 @@ function mainVersion(t: Target): string {
   if ("refused" in v) refuse(v.refused);
   return v.version;
 }
+
+// The tree whose files it reads and writes, when it is not where it runs: the SDK stage runs this from its own
+// pinned checkout over a commit's files (engines/land/crates/sdks stage.rs `rules`), so nothing of that commit's is
+// read as configuration at its start.
+if (process.env.RELEASE_TREE) process.chdir(process.env.RELEASE_TREE);
 
 const [command, arg] = process.argv.slice(2);
 
@@ -84,6 +89,15 @@ if (command === "record") {
       stagePub = createPublicKey(process.env.RELEASE_SIGN_PUB_STAGE);
     } catch {
       refuse("the workflow's RELEASE_SIGN_PUB_STAGE is not a public key");
+    }
+  }
+  // The pipeline service's key, builder-1: its records are of the trees it pushes after a land.
+  let builderPub;
+  if (process.env.RELEASE_SIGN_PUB_BUILDER1?.trim()) {
+    try {
+      builderPub = builderKey(process.env.RELEASE_SIGN_PUB_BUILDER1);
+    } catch {
+      refuse("the workflow's RELEASE_SIGN_PUB_BUILDER1 is not a public key");
     }
   }
   const message = execFileSync("git", ["log", "-1", "--format=%B", "HEAD"], { encoding: "utf8" });
@@ -123,6 +137,7 @@ if (command === "record") {
     pub,
     vin1Pub,
     stagePub,
+    builderPub,
     tree,
     now: new Date(),
     verify,

@@ -10,7 +10,7 @@
 // line, which only the hub's GitHub App writes: the mirror's rulesets), and at
 // most 30 minutes old. The signer signs it only for a commit on main that
 // passed the hub's full check.
-import type { KeyObject } from "node:crypto";
+import { createHash, createPublicKey, verify as edVerify, type KeyObject } from "node:crypto";
 import type { verify as Verify } from "../../../packages/cloud/deploy/release-signature.ts";
 
 export const SDKS_TARGET = "sdks";
@@ -32,6 +32,60 @@ const FULL_SHA = /^[0-9a-f]{40}$/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 /** A record is about 400 bytes; its base64, under this. */
 export const RECORD_MAX_INPUT = 4096;
+
+/** The pipeline's records (engines/land/crates/sdks stage.rs `unsigned_record`, `push_bundles`): the pipeline
+ * service makes one for the landed commit and the mirror tree it read and pushes, and signs it with its one key, builder-1
+ * (engines/cell/deploy/builder.pub), over `runtime sdk record v1\ncommit <sha>\nsha256 <the record's sha256>\n`.
+ * The tag's message is the record, then `builder-1=<signature>`. */
+export const BUILT_SIGNER = "builder-1";
+export const BUILT_SIGNS_AS = "runtime sdk record";
+const BUILT_FIELDS = ["target", "sha", "tree", "due", "at"];
+/** A record signed after the step's tests is pushed in seconds: one dated ahead of the runner's clock by more than
+ * this is no record of ours. */
+const SKEW_MS = 5 * 60_000;
+
+/** builder-1's public half as builder.pub writes it (base64 of the 32 bytes). */
+export function builderKey(raw: string): KeyObject {
+  const bytes = Buffer.from(raw.trim(), "base64");
+  if (bytes.length !== 32) throw new Error("not a 32-byte Ed25519 public key");
+  const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), bytes]);
+  return createPublicKey({ key: spki, format: "der", type: "spki" });
+}
+
+/** Why a record the pipeline service signed does not publish this copy (`commit`, the mirror commit's `tree`), or
+ * undefined when it does: builder-1's signature over the record and the landed commit, each field exactly, and at
+ * most 30 minutes old. */
+export function checkBuilt(
+  text: string,
+  input: { commit: string; tree?: string; pub: KeyObject | undefined; now: Date },
+): string | undefined {
+  const at = text.lastIndexOf(`\n${BUILT_SIGNER}=`);
+  if (at < 0) return `the record carries no ${BUILT_SIGNER} signature`;
+  const record = text.slice(0, at + 1);
+  const sig = text.slice(at + BUILT_SIGNER.length + 2).trim();
+  if (!BASE64.test(sig) || Buffer.from(sig, "base64").length !== 64)
+    return `the record's ${BUILT_SIGNER} signature is not an Ed25519 signature`;
+  if (!input.pub) return `the workflow pins no ${BUILT_SIGNER} key`;
+  const lines = record.slice(0, -1).split("\n");
+  const fields = new Map(lines.map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+  if (lines.length !== BUILT_FIELDS.length || lines.some((l, i) => !l.startsWith(`${BUILT_FIELDS[i]}=`)))
+    return `the record's fields are not ${BUILT_FIELDS.join(", ")}`;
+  const hex = createHash("sha256").update(record).digest("hex");
+  const signed = `${BUILT_SIGNS_AS} v1\ncommit ${input.commit}\nsha256 ${hex}\n`;
+  if (!edVerify(null, Buffer.from(signed), input.pub, Buffer.from(sig, "base64")))
+    return `${BUILT_SIGNER}'s signature does not hold for this record and ${input.commit.slice(0, 9)}`;
+  if (fields.get("target") !== SDKS_TARGET) return `the record is for ${fields.get("target")}, not ${SDKS_TARGET}`;
+  if (fields.get("sha") !== input.commit)
+    return `the record names ${fields.get("sha")?.slice(0, 9)}, not ${input.commit.slice(0, 9)}`;
+  if (fields.get("tree") !== input.tree)
+    return `the record names the tree ${fields.get("tree")?.slice(0, 9)}, not this copy's ${(input.tree ?? "(unread)").slice(0, 9)}`;
+  const when = Date.parse(fields.get("at") ?? "");
+  if (!Number.isFinite(when)) return "the record names no time";
+  const age = input.now.getTime() - when;
+  if (age > RECORD_MAX_AGE_MS) return `the record is ${Math.round(age / 60_000)} minutes old`;
+  if (age < -SKEW_MS) return "the record is dated ahead of this runner's clock";
+  return undefined;
+}
 
 /** The tags vin-1 publishes with: `publish/<commit>`. */
 export const PUBLISH_TAG = "refs/tags/publish/";
@@ -87,6 +141,8 @@ export function checkDispatch(input: {
    * RELEASE_SIGN_PUB_STAGE): its records name CI/CD's pass and the copy's
    * own tree, as vin-1's do. */
   stagePub?: KeyObject | undefined;
+  /** The pipeline service's key, builder-1 (RELEASE_SIGN_PUB_BUILDER1): its records are [checkBuilt]'s. */
+  builderPub?: KeyObject | undefined;
   /** The tree of the mirror commit checked out, which every job publishes
    * from (`git rev-parse HEAD^{tree}`). vin-1 signs the tree it read back
    * with its own git from the copy it pushed, so its record publishes only
@@ -106,6 +162,8 @@ export function checkDispatch(input: {
   if (copied !== input.commit)
     return `this mirror commit is a copy of ${copied.slice(0, 9)}, not ${input.commit.slice(0, 9)}`;
   const text = Buffer.from(input.record, "base64").toString("utf8");
+  if (text.includes(`\n${BUILT_SIGNER}=`))
+    return checkBuilt(text, { commit: input.commit, tree: input.tree, pub: input.builderPub, now: input.now });
   // verify() takes exactly the record's fields, in order, and refuses a
   // line more or less; the action and target are asked for exactly: a
   // record the signer gave for anything else (a host, controller, settings
