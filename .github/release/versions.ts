@@ -7,23 +7,23 @@
 //   under way when the next landing comes is not counted twice).
 // - Step: minor when the API's description (openapi v2.json) differs from the one the mirror last shipped, else
 //   patch. Never major: a break never ships (`nomajor`; sdks/release.sh surface and spec-gen check refuse one).
-// - Due: only a package whose tree differs from the mirror's copy, its version lines aside: nothing changed, nothing
-//   published.
+// - Due: only a package whose tree differs from the mirror's copy, its version lines aside, or whose copy's version
+//   its registry does not list (an upload that failed is made again): nothing changed, nothing published.
 //
 // Node runs this file in the mirror with its types stripped, so it imports nothing and uses no syntax that has to be
 // compiled.
 
 export type Pkg = "js" | "python" | "ruby" | "go" | "java";
 
-/** Each SDK: its folder in the public tree (sdks/release.sh writes it), its publish workflow's jobs, and its files
- * whose version lines release.sh writes (each line naming a version is that package's version, so a diff that is
- * only those lines is no change). */
-export const SDKS: Record<Pkg, { dir: string; targets: readonly string[]; versioned: readonly string[] }> = {
-  js: { dir: "packages/cloud-sdk", targets: ["npm", "mcp"], versioned: ["package.json", "server.json"] },
-  python: { dir: "sdks/python", targets: ["pypi"], versioned: ["pyproject.toml", "withruntime/_version.py"] },
-  ruby: { dir: "sdks/ruby", targets: ["rubygems"], versioned: ["lib/withruntime/version.rb"] },
-  go: { dir: "sdks/go", targets: ["go"], versioned: ["client.go"] },
-  java: { dir: "sdks/java", targets: ["maven"], versioned: ["pom.xml"] },
+/** Each SDK: its folder in the public tree (sdks/release.sh writes it), its publish workflow's jobs, its files whose
+ * version lines release.sh writes (each line naming a version is that package's version, so a diff that is only
+ * those lines is no change), and the line of the first that names it. */
+export const SDKS: Record<Pkg, { dir: string; targets: readonly string[]; versioned: readonly string[]; named: RegExp }> = {
+  js: { dir: "packages/cloud-sdk", targets: ["npm", "mcp"], versioned: ["package.json", "server.json"], named: /^ {2}"version": "([^"]*)",$/m },
+  python: { dir: "sdks/python", targets: ["pypi"], versioned: ["pyproject.toml", "withruntime/_version.py"], named: /^version = "([^"]*)"$/m },
+  ruby: { dir: "sdks/ruby", targets: ["rubygems"], versioned: ["lib/withruntime/version.rb"], named: /^ {2}VERSION = "([^"]*)"$/m },
+  go: { dir: "sdks/go", targets: ["go"], versioned: ["client.go"], named: /^const Version = "([^"]*)"$/m },
+  java: { dir: "sdks/java", targets: ["maven"], versioned: ["pom.xml"], named: /^ {2}<version>([^<]*)<\/version>$/m },
 };
 export const PKGS = Object.keys(SDKS) as Pkg[];
 

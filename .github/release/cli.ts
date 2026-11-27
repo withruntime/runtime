@@ -15,7 +15,8 @@
 //                                               for export.sh's SDK_VERSIONS
 //   bun scripts/public-sdk/release/cli.ts due MIRROR OUT js=X python=X ...
 //                                               each SDK in OUT whose tree is the mirror's, its version lines aside,
-//                                               put back as the mirror has it; the due line of the rest on stdout
+//                                               and whose mirror version its registry lists, put back as the mirror
+//                                               has it; the due line of the rest on stdout
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -156,7 +157,11 @@ if (command === "record") {
         return x === y || (versioned.includes(f) && unversioned(x) === unversioned(y));
       });
     })();
-    if (same) {
+    // The version the mirror's copy names, published: a copy whose upload failed (or never ran) is due again.
+    const held = SDKS[pkg].named.exec(read(join(a, versioned[0]!)) ?? "")?.[1];
+    const listed = held ? await REGISTRIES[SDKS[pkg].targets[0] as Target].read(fetch) : [];
+    if (!Array.isArray(listed)) refuse(listed.unread);
+    if (same && held && listed.map((v) => v.replace(/^v/, "")).includes(held)) {
       // Nothing changed: the copy keeps the version the registry has.
       rmSync(b, { recursive: true, force: true });
       cpSync(a, b, { recursive: true });
