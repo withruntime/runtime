@@ -1,35 +1,22 @@
-# Publishes the SDKs from this public mirror (Marc, 14 October 2026: agents
-# update and publish the SDKs end to end, and nobody needs his Mac). Runtime's
-# hub copies a commit of its main repository here, as its GitHub App, then
-# starts this workflow with that commit and a record its release signer
-# signed for it. Its source is scripts/public-sdk/publish.yml in Runtime's
-# main repository; export.sh copies it here.
+# Publishes the SDKs from this public mirror. After each landing of Runtime's
+# main goes live, the line (engines/products/crates/pipelines sdks.rs) copies
+# it here and pushes an annotated tag publish/<commit> on that copy, its
+# message a record signed with the line's key, builder-1: the commit, this
+# exact tree, and each due package's version. Its source is
+# scripts/public-sdk/publish.yml in Runtime's main repository; export.sh
+# copies it here.
 #
-# Each registry's job, all at once, first checks the record with the
-# signer's public key below on the commit it checked out, so a run nobody at
-# Runtime asked for publishes nothing. vin-1 starts it without a token: it
-# pushes an annotated tag publish/<commit> on a commit of main, the record
-# its message, with the mirror's deploy key. Each job runs in the
-# environment `release` (main and publish/* tags): it skips a version the
-# registry has and refuses one at or below its newest, then publishes. npm, PyPI and
+# Each registry's job, all at once, first checks the record with builder-1's
+# public key below on the commit it checked out, so a tag nobody at Runtime
+# signed publishes nothing; then it publishes the version the record names,
+# skips one the registry has and refuses one at or below its newest. Each runs
+# in the environment `release` (main and publish/* tags). npm, PyPI and
 # RubyGems trust this workflow by OIDC (no token anywhere); Maven Central and
-# the MCP registry read the environment's secrets. The Go module is released
-# by the hub itself (withruntime/go), never here.
+# the MCP registry read the environment's secrets. The Go module is the tag
+# v<version> the line pushes on withruntime/go, never here.
 name: Publish SDKs
 
 on:
-  workflow_dispatch:
-    inputs:
-      commit:
-        description: "The commit of Runtime's main repository this copy came from"
-        required: true
-        type: string
-      record:
-        description: "The hub's signed release record for it, base64"
-        required: true
-        type: string
-  # vin-1 publishes without a token: it pushes an annotated tag
-  # publish/<commit> with its deploy key, the record its message.
   push:
     tags: ["publish/*"]
 
@@ -40,38 +27,14 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The hub's release signer's public key (/etc/release-signer/release-sign.pub,
-  # pinned on vin-1 by agents/install-signer.sh, the host job signer-install,
-  # which prints it). There is one signer and one key: install-signer.sh
-  # refuses unless the signer's key equals vin-1's pin
-  # /root/.runtime/release-sign.pub, the file agents/ship-it.ts
-  # SHIP_SIGNER_PUB copies (Marc's approval alone changes it, and the hub
-  # fails while it differs from vin-1's). export.test.ts holds this key to
-  # that pin and to vin-1's SIGN_PIN fingerprint after the 28 October
-  # reinstall (#4554), so a new signer key moves all three together.
-  RELEASE_SIGN_PUB: |
-    -----BEGIN PUBLIC KEY-----
-    MCowBQYDK2VwAyEA/6LPzbdhAsnnUqOvAVRYS0NraX7kGlGKcWBWJ4Hwv1U=
-    -----END PUBLIC KEY-----
-  # vin-1's own SDK key (control-fleet checks/sdks.rs), whose records name
-  # CI/CD's pass of the commit, never the hub's full check. Empty: none
-  # pinned, and only the hub's records publish.
-  RELEASE_SIGN_PUB_VIN1: |
-    -----BEGIN PUBLIC KEY-----
-    MCowBQYDK2VwAyEA3nVBtUcNe1HKAs9BkGjajvTJELj42/r5nvVF5jcxKlo=
-    -----END PUBLIC KEY-----
-  # CI/CD's SDK stage on next (engines/land/crates/sdks, runtime-land-sdks),
-  # whose records name CI/CD's pass and the copy's tree, as vin-1's do.
-  # Empty: none pinned, and the stage publishes nothing. Its key is pinned
-  # here only on Marc's approval.
-  RELEASE_SIGN_PUB_STAGE: ""
+  # The line's one key, builder-1 (engines/cell/deploy/builder.pub, which
+  # export.test.ts holds this to).
+  RELEASE_SIGN_PUB_BUILDER1: "kyXJqR+AfeHmx1++NBDrJoeqfjwfIkV++Rr/BamO7DY="
 
 jobs:
   npm:
     name: npm withruntime
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
+    if: startsWith(github.ref, 'refs/tags/publish/')
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -87,17 +50,13 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       # The signed record, checked in this job on the very commit it
-      # publishes, before anything else reads it: no job waits for another
-      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
-      # (or the tag) reach the check as data only (the environment, git);
-      # it refuses a commit that is not 40 hex and a record that is not
-      # base64 under 4 KiB before it reads them.
-      - name: Check the record
-        env:
-          COMMIT: ${{ inputs.commit }}
-          RECORD: ${{ inputs.record }}
-        run: node .github/release/cli.ts record
+      # publishes, before anything else reads it. The tag reaches the check
+      # as data only (git).
+      - id: record
+        run: node .github/release/cli.ts record >> "$GITHUB_OUTPUT"
       - id: decide
+        env:
+          DUE: ${{ steps.record.outputs.due }}
         run: node .github/release/cli.ts decide npm >> "$GITHUB_OUTPUT"
       - if: steps.decide.outputs.do == 'publish'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -109,10 +68,7 @@ jobs:
       - name: Publish
         if: steps.decide.outputs.do == 'publish'
         working-directory: packages/cloud-sdk
-        # Trusted publishing needs npm 11.5.1 or later; provenance comes with
-        # it. The runner's Node 24 carries a newer one (npm 11.19.1 with Node
-        # 24.22.1 on 31 October 2026), so installing 11.6.2 cost 5 s of every
-        # publish and only moved npm back: an older one is refused instead.
+        # Trusted publishing needs npm 11.5.1 or later; provenance comes with it.
         run: |
           node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$(npm --version)" ||
             { echo "npm $(npm --version) is older than 11.5.1, which trusted publishing needs." >&2; exit 1; }
@@ -121,9 +77,7 @@ jobs:
   mcp:
     name: MCP registry com.withruntime/runtime
     needs: [npm]
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
+    if: startsWith(github.ref, 'refs/tags/publish/')
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -136,22 +90,17 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # The signed record, checked in this job on the very commit it
-      # publishes, before anything else reads it: no job waits for another
-      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
-      # (or the tag) reach the check as data only (the environment, git);
-      # it refuses a commit that is not 40 hex and a record that is not
-      # base64 under 4 KiB before it reads them.
-      - name: Check the record
-        env:
-          COMMIT: ${{ inputs.commit }}
-          RECORD: ${{ inputs.record }}
-        run: node .github/release/cli.ts record
+      - id: record
+        run: node .github/release/cli.ts record >> "$GITHUB_OUTPUT"
       - id: decide
+        env:
+          DUE: ${{ steps.record.outputs.due }}
         run: node .github/release/cli.ts decide mcp >> "$GITHUB_OUTPUT"
       # The registry checks the version on npm, which can take minutes to
       # show it (it refused 0.3.1 on 23 September 2026 for exactly that).
       - if: steps.decide.outputs.do == 'publish'
+        env:
+          DUE: ${{ steps.record.outputs.due }}
         run: node .github/release/cli.ts wait npm
       - name: Publish
         if: steps.decide.outputs.do == 'publish'
@@ -160,14 +109,14 @@ jobs:
           # withruntime.com's key, whose public half is the domain's TXT
           # record: its 32-byte seed, hex.
           MCP_REGISTRY_KEY: ${{ secrets.MCP_REGISTRY_KEY }}
+          DUE: ${{ steps.record.outputs.due }}
         run: |
           curl -fsSL -o /tmp/mcp-publisher.tar.gz https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
           echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  /tmp/mcp-publisher.tar.gz" | sha256sum -c -
           tar -xzf /tmp/mcp-publisher.tar.gz -C /tmp mcp-publisher
           # The registry answers a gateway timeout now and then (504 on
-          # 18 October 2026; the same publish went through 20 minutes
-          # later), and one that timed out may still have landed: try
-          # again, and stop once it lists the version.
+          # 18 October 2026), and one that timed out may still have landed:
+          # try again, and stop once it lists the version.
           for try in 1 2 3 4; do
             /tmp/mcp-publisher login dns --domain withruntime.com --private-key "$MCP_REGISTRY_KEY" &&
               /tmp/mcp-publisher publish && exit 0
@@ -179,43 +128,14 @@ jobs:
           echo "The MCP registry refused all four tries." >&2
           exit 1
 
-  # Each project's own job: one PyPI refuses never holds back another. All
-  # publish from `release`; PyPI holds one pending publisher per
-  # (repository, workflow, environment), so of the projects with no upload
-  # yet only the first goes, the rest skip (registries.ts
-  # waitsForFirstUpload).
   pypi:
-    name: PyPI ${{ matrix.project }}
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
+    name: PyPI withruntime
+    if: startsWith(github.ref, 'refs/tags/publish/')
     runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: read
       id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - project: withruntime
-            target: pypi
-            dir: sdks/python
-          - project: langchain-withruntime
-            target: langchain
-            dir: sdks/python/integrations/langchain-withruntime
-          - project: openai-agents-withruntime
-            target: openai-agents
-            dir: integrations/openai-agents
-          - project: pydantic-ai-withruntime
-            target: pydantic-ai
-            dir: integrations/pydantic-ai
-          - project: google-adk-withruntime
-            target: google-adk
-            dir: integrations/google-adk
-          - project: smolagents-withruntime
-            target: smolagents
-            dir: integrations/smolagents
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -224,22 +144,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # The signed record, checked in this job on the very commit it
-      # publishes, before anything else reads it: no job waits for another
-      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
-      # (or the tag) reach the check as data only (the environment, git);
-      # it refuses a commit that is not 40 hex and a record that is not
-      # base64 under 4 KiB before it reads them.
-      - name: Check the record
-        env:
-          COMMIT: ${{ inputs.commit }}
-          RECORD: ${{ inputs.record }}
-        run: node .github/release/cli.ts record
+      - id: record
+        run: node .github/release/cli.ts record >> "$GITHUB_OUTPUT"
       - id: decide
-        run: node .github/release/cli.ts decide ${{ matrix.target }} >> "$GITHUB_OUTPUT"
+        env:
+          DUE: ${{ steps.record.outputs.due }}
+        run: node .github/release/cli.ts decide pypi >> "$GITHUB_OUTPUT"
       - name: Build
         if: steps.decide.outputs.do == 'publish'
-        run: pipx run --spec build==1.3.0 pyproject-build --outdir dist "${{ matrix.dir }}"
+        run: pipx run --spec build==1.3.0 pyproject-build --outdir dist sdks/python
       - name: Publish
         if: steps.decide.outputs.do == 'publish'
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
@@ -248,9 +161,7 @@ jobs:
 
   rubygems:
     name: RubyGems withruntime
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
+    if: startsWith(github.ref, 'refs/tags/publish/')
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -264,18 +175,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # The signed record, checked in this job on the very commit it
-      # publishes, before anything else reads it: no job waits for another
-      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
-      # (or the tag) reach the check as data only (the environment, git);
-      # it refuses a commit that is not 40 hex and a record that is not
-      # base64 under 4 KiB before it reads them.
-      - name: Check the record
-        env:
-          COMMIT: ${{ inputs.commit }}
-          RECORD: ${{ inputs.record }}
-        run: node .github/release/cli.ts record
+      - id: record
+        run: node .github/release/cli.ts record >> "$GITHUB_OUTPUT"
       - id: decide
+        env:
+          DUE: ${{ steps.record.outputs.due }}
         run: node .github/release/cli.ts decide rubygems >> "$GITHUB_OUTPUT"
       - name: Build
         if: steps.decide.outputs.do == 'publish'
@@ -290,9 +194,7 @@ jobs:
 
   maven:
     name: Maven Central com.withruntime:withruntime
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
+    if: startsWith(github.ref, 'refs/tags/publish/')
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -305,18 +207,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # The signed record, checked in this job on the very commit it
-      # publishes, before anything else reads it: no job waits for another
-      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
-      # (or the tag) reach the check as data only (the environment, git);
-      # it refuses a commit that is not 40 hex and a record that is not
-      # base64 under 4 KiB before it reads them.
-      - name: Check the record
-        env:
-          COMMIT: ${{ inputs.commit }}
-          RECORD: ${{ inputs.record }}
-        run: node .github/release/cli.ts record
+      - id: record
+        run: node .github/release/cli.ts record >> "$GITHUB_OUTPUT"
       - id: decide
+        env:
+          DUE: ${{ steps.record.outputs.due }}
         run: node .github/release/cli.ts decide maven >> "$GITHUB_OUTPUT"
       - name: Build, sign, upload and publish
         if: steps.decide.outputs.do == 'publish'

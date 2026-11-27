@@ -1,44 +1,27 @@
-// The publish workflow's steps (publish.yml), run by Node in the public
-// mirror from .github/release/, at the mirror's root:
+// The SDK release's steps. In the public mirror, the publish workflow's (publish.yml), run by Node from
+// .github/release/ at the mirror's root:
 //
-//   node .github/release/cli.ts record          COMMIT, RECORD and RELEASE_SIGN_PUB
-//                                               in the environment; exit 1 refuses
-//   node .github/release/cli.ts decide <target> version=X and do=publish|skip on
-//                                               stdout (for $GITHUB_OUTPUT); exit 1 refuses
-//   node .github/release/cli.ts wait <target>   until the registry lists main's version
-//                                               (the MCP registry checks npm's)
+//   node .github/release/cli.ts record          the tag's record checked with RELEASE_SIGN_PUB_BUILDER1;
+//                                               due=<its line> on stdout (for $GITHUB_OUTPUT); exit 1 refuses
+//   node .github/release/cli.ts decide <target> version=X and do=publish|skip on stdout, from DUE (the record's
+//                                               due line); exit 1 refuses
+//   node .github/release/cli.ts wait <target>   until the registry lists DUE's version of it
 //
-// and, in Runtime's main repository before the copy is made:
+// and on the line, from its checkout of the landed commit, before and after export.sh writes the copy
+// (engines/products/crates/pipelines sdks.rs):
 //
-//   bun scripts/public-sdk/release/cli.ts set <pkg> <X.Y.Z>
-//                                               every version file of <pkg> at X.Y.Z: CI/CD's SDK
-//                                               stage (runtime-land-sdks) writes the version it
-//                                               decided into the copy it signs, never into a commit
-//   bun scripts/public-sdk/release/cli.ts versions <pkg>
-//                                               files=X (its version files) and newest=Y (its
-//                                               registry's newest X.Y.Z, empty when none)
+//   bun scripts/public-sdk/release/cli.ts next MIRROR SRC
+//                                               each SDK's next version (`js=X python=X ruby=X go=X java=X`),
+//                                               for export.sh's SDK_VERSIONS
+//   bun scripts/public-sdk/release/cli.ts due MIRROR OUT js=X python=X ...
+//                                               each SDK in OUT whose tree is the mirror's, its version lines aside,
+//                                               put back as the mirror has it; the due line of the rest on stdout
 import { execFileSync } from "node:child_process";
-import { createPublicKey } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import {
-  REGISTRIES,
-  type Target,
-  TARGETS,
-  compare,
-  decide,
-  onPypi,
-  waitsForFirstUpload,
-} from "./registries.ts";
-import { PKGS, type Pkg, SEMVER, readVersion, withVersion } from "./versions.ts";
-import { checkDispatch, fromTag } from "./verify-record.ts";
-
-const read = (path: string) => {
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return undefined;
-  }
-};
+import { cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { REGISTRIES, type Target, TARGETS, decide } from "./registries.ts";
+import { PKGS, SDKS, dueLine, dueOf, next, stepOf, unversioned } from "./versions.ts";
+import { builderKey, checkBuilt, copiedFrom, fromTag } from "./verify-record.ts";
 
 function refuse(why: string): never {
   console.error(`REFUSED: ${why}`);
@@ -50,156 +33,138 @@ function target(name: string | undefined): Target {
   return name as Target;
 }
 
-function mainVersion(t: Target): string {
-  const v = readVersion(REGISTRIES[t].pkg, read);
-  if ("refused" in v) refuse(v.refused);
-  return v.version;
+/** The version the record's due line names for `t`, or undefined when it names none. */
+const dueVersion = (t: Target) => dueOf(process.env.DUE ?? "").get(t);
+
+const git = (dir: string, ...args: string[]) => {
+  try {
+    return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  } catch {
+    return undefined;
+  }
+};
+
+const read = (path: string) => {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+};
+
+/** Every file under `dir`, relative to it, sorted. */
+function files(dir: string, at = ""): string[] {
+  if (!existsSync(join(dir, at))) return [];
+  return readdirSync(join(dir, at))
+    .sort()
+    .flatMap((n) => (statSync(join(dir, at, n)).isDirectory() ? files(dir, join(at, n)) : [join(at, n)]));
 }
 
-const [command, arg] = process.argv.slice(2);
+const [command, arg, arg2] = process.argv.slice(2);
 
 if (command === "record") {
-  // The signature module sits beside this file in the mirror (export.sh).
-  const { verify } = await import(new URL("./release-signature.ts", import.meta.url).href);
   let pub;
   try {
-    pub = createPublicKey(process.env.RELEASE_SIGN_PUB ?? "");
+    pub = builderKey(process.env.RELEASE_SIGN_PUB_BUILDER1 ?? "");
   } catch {
-    refuse("the workflow's RELEASE_SIGN_PUB is not a public key");
+    refuse("the workflow's RELEASE_SIGN_PUB_BUILDER1 is not a public key");
   }
-  // vin-1's own SDK key, when the workflow pins one: its records name
-  // CI/CD's pass (verify-record.ts SDKS_CHECK_VIN1).
-  let vin1Pub;
-  if (process.env.RELEASE_SIGN_PUB_VIN1?.trim()) {
-    try {
-      vin1Pub = createPublicKey(process.env.RELEASE_SIGN_PUB_VIN1);
-    } catch {
-      refuse("the workflow's RELEASE_SIGN_PUB_VIN1 is not a public key");
-    }
-  }
-  // CI/CD's SDK stage's key on next, when the workflow pins one.
-  let stagePub;
-  if (process.env.RELEASE_SIGN_PUB_STAGE?.trim()) {
-    try {
-      stagePub = createPublicKey(process.env.RELEASE_SIGN_PUB_STAGE);
-    } catch {
-      refuse("the workflow's RELEASE_SIGN_PUB_STAGE is not a public key");
-    }
-  }
-  const message = execFileSync("git", ["log", "-1", "--format=%B", "HEAD"], { encoding: "utf8" });
-  let commit = process.env.COMMIT ?? "";
-  let record = process.env.RECORD ?? "";
-  // A push of vin-1's tag publish/<commit>: the record is its message.
-  if (process.env.GITHUB_EVENT_NAME === "push") {
-    const ref = process.env.GITHUB_REF ?? "";
-    // Each answer, or undefined when the command failed.
-    const git = (...args: string[]) => {
-      try {
-        return execFileSync("git", args, { encoding: "utf8" }).trim();
-      } catch {
-        return undefined;
-      }
-    };
-    const main = "refs/remotes/origin/main";
-    git("fetch", "-q", "--no-tags", "origin", `+${ref}:${ref}`, `+refs/heads/main:${main}`);
-    const head = git("rev-parse", "HEAD") ?? "";
-    const tagged = fromTag({
-      ref,
-      type: git("cat-file", "-t", ref) ?? "",
-      tag: git("cat-file", "-p", ref) ?? "",
-      tagged: git("rev-parse", `${ref}^{commit}`) ?? "",
-      head,
-      onMain: git("merge-base", "--is-ancestor", head, main) !== undefined,
-    });
-    if ("refused" in tagged) refuse(tagged.refused);
-    commit = tagged.commit;
-    record = tagged.record;
-  }
-  const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
-  const why = checkDispatch({
-    commit,
-    record,
-    message,
-    pub,
-    vin1Pub,
-    stagePub,
-    tree,
-    now: new Date(),
-    verify,
+  const ref = process.env.GITHUB_REF ?? "";
+  const main = "refs/remotes/origin/main";
+  git(".", "fetch", "-q", "--no-tags", "origin", `+${ref}:${ref}`, `+refs/heads/main:${main}`);
+  const head = git(".", "rev-parse", "HEAD") ?? "";
+  const tagged = fromTag({
+    ref,
+    type: git(".", "cat-file", "-t", ref) ?? "",
+    tag: git(".", "cat-file", "-p", ref) ?? "",
+    tagged: git(".", "rev-parse", `${ref}^{commit}`) ?? "",
+    head,
+    onMain: git(".", "merge-base", "--is-ancestor", head, main) !== undefined,
   });
-  if (why) refuse(why);
-  console.error(`The signed record holds for ${process.env.COMMIT}.`);
+  if ("refused" in tagged) refuse(tagged.refused);
+  const copied = copiedFrom(git(".", "log", "-1", "--format=%B", "HEAD") ?? "");
+  if (copied !== tagged.commit)
+    refuse(`this mirror commit is a copy of ${copied?.slice(0, 9) ?? "nothing"}, not ${tagged.commit.slice(0, 9)}`);
+  const verdict = checkBuilt(tagged.record, {
+    commit: tagged.commit,
+    tree: git(".", "rev-parse", "HEAD^{tree}"),
+    pub,
+    now: new Date(),
+  });
+  if ("refused" in verdict) refuse(verdict.refused);
+  console.error(`The signed record holds for ${tagged.commit}: ${verdict.due}`);
+  console.log(`due=${verdict.due.replace(/^due=/, "")}`);
 } else if (command === "decide") {
   const t = target(arg);
-  const version = mainVersion(t);
-  const published = await REGISTRIES[t].read(fetch);
-  if (!Array.isArray(published)) refuse(published.unread);
-  // A PyPI project's first upload waits for any before it (waitsForFirstUpload).
-  const lists: Partial<Record<Target, readonly string[]>> = { [t]: published };
-  if (onPypi(t) && !published.length)
-    for (const o of TARGETS.slice(0, TARGETS.indexOf(t)).filter(onPypi)) {
-      const l = await REGISTRIES[o].read(fetch);
-      if (!Array.isArray(l)) refuse(l.unread);
-      lists[o] = l;
-    }
-  const waits = waitsForFirstUpload(t, (o) => lists[o] ?? []);
-  if (waits) {
-    console.error(
-      `${REGISTRIES[t].label} waits for ${waits}'s first upload: PyPI holds one pending publisher for \`release\`.`,
-    );
-    console.log(`version=${version}\ndo=skip`);
+  const version = dueVersion(t);
+  if (!version) {
+    console.error(`${REGISTRIES[t].label}: not in this release: skipped.`);
+    console.log("do=skip");
     process.exit(0);
   }
+  const published = await REGISTRIES[t].read(fetch);
+  if (!Array.isArray(published)) refuse(published.unread);
   const d = decide(version, published, REGISTRIES[t].label);
   if ("refused" in d) refuse(d.refused);
   console.error(
-    d.do === "skip"
-      ? `${REGISTRIES[t].label} has ${version} already: skipped.`
-      : `${REGISTRIES[t].label}: ${version} goes out.`,
+    d.do === "skip" ? `${REGISTRIES[t].label} has ${version} already: skipped.` : `${REGISTRIES[t].label}: ${version} goes out.`,
   );
   console.log(`version=${version}\ndo=${d.do}`);
 } else if (command === "wait") {
   const t = target(arg);
-  const version = mainVersion(t);
+  const version = dueVersion(t) ?? refuse(`the release names no version of ${t}`);
   for (let i = 0; ; i++) {
     const published = await REGISTRIES[t].read(fetch);
     if (Array.isArray(published) && published.includes(version)) break;
     if (i >= 600) refuse(`${REGISTRIES[t].label} does not list ${version} after 20 minutes`);
     console.error(`Waiting for ${REGISTRIES[t].label} to list ${version}...`);
-    // Read every 2 s: a 20 s pause left the MCP publish waiting up to 20 s
-    // past npm's own listing (10 s on average), for one small read.
     await new Promise((r) => setTimeout(r, 2_000));
   }
-} else if (command === "set") {
-  // The files must agree first (withVersion): a set never papers over a
-  // disagreement, and a version only ever moves forward from them.
-  const pkg = arg as Pkg;
-  const version = process.argv[4] ?? "";
-  if (!PKGS.includes(pkg)) refuse(`no SDK ${arg}; one of ${PKGS.join(", ")}`);
-  const now = readVersion(pkg, read);
-  if ("refused" in now) refuse(now.refused);
-  let files: Record<string, string>;
-  try {
-    files = withVersion(pkg, version, read);
-  } catch (e) {
-    refuse((e as Error).message);
-  }
-  for (const [path, text] of Object.entries(files)) writeFileSync(path, text);
-  console.error(`${pkg}: ${now.version} -> ${version}`);
-} else if (command === "versions") {
-  // What CI/CD's SDK stage moves a version from: the one the files name,
-  // and the newest X.Y.Z the SDK's first registry lists (none: empty).
-  const pkg = arg as Pkg;
-  if (!PKGS.includes(pkg)) refuse(`no SDK ${arg}; one of ${PKGS.join(", ")}`);
-  const files = readVersion(pkg, read);
-  if ("refused" in files) refuse(files.refused);
-  const t = TARGETS.find((t) => REGISTRIES[t].pkg === pkg)!;
-  const published = await REGISTRIES[t].read(fetch);
-  if (!Array.isArray(published)) refuse(published.unread);
-  const releases = published.map((v) => v.replace(/^v/, "")).filter((v) => SEMVER.test(v));
-  const newest = releases.sort(compare).at(-1) ?? "";
-  console.log(`files=${files.version}\nnewest=${newest}`);
-} else
-  refuse(
-    "usage: cli.ts record | decide <target> | wait <target> | set <pkg> <X.Y.Z> | versions <pkg>",
+} else if (command === "next") {
+  const mirror = arg ?? refuse("next MIRROR SRC");
+  const src = arg2 ?? refuse("next MIRROR SRC");
+  const spec = read(join(src, "engines/front/crates/spec/openapi/v2.json")) ?? refuse(`${src} holds no API description`);
+  const step = stepOf(spec, read(join(mirror, SDKS.js.dir, "openapi.json")));
+  // What the mirror's newest record sent, by target: its tags are the line's own record of what it published.
+  const last = (git(mirror, "tag", "-l", "publish/*", "--sort=-creatordate") ?? "").split("\n").filter(Boolean)[0];
+  const sent = dueOf(
+    (last ? (git(mirror, "tag", "-l", "--format=%(contents)", last) ?? "") : "").split("\n").find((l) => l.startsWith("due=")) ?? "",
   );
+  const out: string[] = [];
+  for (const pkg of PKGS) {
+    const t = SDKS[pkg].targets[0] as Target;
+    const listed = await REGISTRIES[t].read(fetch);
+    if (!Array.isArray(listed)) refuse(listed.unread);
+    out.push(`${pkg}=${next(listed, sent.get(t), step)}`);
+  }
+  console.error(`The API's description ${step === "minor" ? "changed" : "did not change"}: each due SDK takes a ${step} step.`);
+  console.log(out.join(" "));
+} else if (command === "due") {
+  const mirror = arg ?? refuse("due MIRROR OUT");
+  const out = arg2 ?? refuse("due MIRROR OUT");
+  // The versions export.sh wrote, as `next` printed them.
+  const versions = new Map(process.argv.slice(5).map((w) => w.split("=") as [string, string]));
+  const due: { pkg: (typeof PKGS)[number]; version: string }[] = [];
+  for (const pkg of PKGS) {
+    const { dir, versioned } = SDKS[pkg];
+    const [a, b] = [join(mirror, dir), join(out, dir)];
+    const same = (() => {
+      const [fa, fb] = [files(a), files(b)];
+      if (fa.join("\n") !== fb.join("\n")) return false;
+      return fb.every((f) => {
+        const [x, y] = [readFileSync(join(a, f), "utf8"), readFileSync(join(b, f), "utf8")];
+        return x === y || (versioned.includes(f) && unversioned(x) === unversioned(y));
+      });
+    })();
+    if (same) {
+      // Nothing changed: the copy keeps the version the registry has.
+      rmSync(b, { recursive: true, force: true });
+      cpSync(a, b, { recursive: true });
+      continue;
+    }
+    const v = versions.get(pkg) ?? refuse(`no version of ${pkg} among ${process.argv.slice(5).join(" ")}`);
+    due.push({ pkg, version: v });
+  }
+  console.log(dueLine(due));
+} else refuse("usage: cli.ts record | decide <target> | wait <target> | next MIRROR SRC | due MIRROR OUT VERSIONS...");
+

@@ -1,48 +1,88 @@
-// The publish workflow's first job (publish.yml): it publishes only a copy
-// the hub made and asked for (Marc, 14 October 2026). Anyone who can start a
-// workflow in the public mirror could start this one, so it takes nothing on
-// their word: the dispatch carries a record signed by the hub's release
-// signer (agents/release-signer.py), checked here with the signer's public
-// key written into the workflow itself, with the same verify() the deploy
-// followers use (packages/cloud/deploy/release-signature.ts, copied beside
-// this file in the mirror). The record must be for target `sdks`, for the
-// commit of Runtime's main repository this copy came from (its "Copied from"
-// line, which only the hub's GitHub App writes: the mirror's rulesets), and at
-// most 30 minutes old. The signer signs it only for a commit on main that
-// passed the hub's full check.
-import type { KeyObject } from "node:crypto";
-import type { verify as Verify } from "../../../packages/cloud/deploy/release-signature.ts";
+// The publish workflow's first step in every job (publish.yml): it publishes only a copy the line made and signed
+// (Marc, 14 October 2026). Anyone who can push a tag to the public mirror could start this workflow, so it takes
+// nothing on their word: the tag `publish/<commit>` carries a record signed by the line's key, builder-1, checked
+// here with that key's public half written into the workflow itself. The record names the commit of Runtime's main
+// repository the copy came from (its "Copied from" line), the mirror tree it publishes, exactly, and each package's
+// version (`due=`), and is at most 30 minutes old.
+import { createHash, createPublicKey, verify as edVerify, type KeyObject } from "node:crypto";
 
 export const SDKS_TARGET = "sdks";
-/** The signer names a host walk in every release record; an SDK release
- * walks no host, so it names vin-0, which no follower walks (as the
- * signer's self-test does). */
-export const SDKS_HOSTS = "vin-0";
-export const SDKS_CHECK = "runtime/full-check";
-/** What vin-1's own SDK key signs for (engines control-fleet checks/sdks.rs):
- * a commit its follower admitted on CI/CD's landed pass of main. Each key
- * is held to its own check: the hub's never names this one, vin-1's never
- * the hub's. */
-export const SDKS_CHECK_VIN1 = "runtime/ci-cd";
-/** A dispatch can wait for a runner, and the npm job waits for nothing but
- * this one: longer than the followers' 10 minutes, still short. */
+/** A tag waits for runners: longer than a push takes, still short. */
 export const RECORD_MAX_AGE_MS = 30 * 60_000;
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
-/** A record is about 400 bytes; its base64, under this. */
-export const RECORD_MAX_INPUT = 4096;
 
-/** The tags vin-1 publishes with: `publish/<commit>`. */
+/** The line's records (engines/products/crates/pipelines sdks.rs `record`): one for the landed commit, the mirror
+ * tree it pushes and the versions due, signed with its one key, builder-1 (engines/cell/deploy/builder.pub), over
+ * `runtime sdk record v1\ncommit <sha>\nsha256 <the record's sha256>\n`. The tag's message is the record, then
+ * `builder-1=<signature>`. */
+export const BUILT_SIGNER = "builder-1";
+export const BUILT_SIGNS_AS = "runtime sdk record";
+const BUILT_FIELDS = ["target", "sha", "tree", "due", "at"];
+/** A record signed after the step's tests is pushed in seconds: one dated ahead of the runner's clock by more than
+ * this is no record of ours. */
+const SKEW_MS = 5 * 60_000;
+
+/** builder-1's public half as builder.pub writes it (base64 of the 32 bytes). */
+export function builderKey(raw: string): KeyObject {
+  const bytes = Buffer.from(raw.trim(), "base64");
+  if (bytes.length !== 32) throw new Error("not a 32-byte Ed25519 public key");
+  const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), bytes]);
+  return createPublicKey({ key: spki, format: "der", type: "spki" });
+}
+
+/** Why a record the line signed does not publish this copy (`commit`, the mirror commit's `tree`), or its due line
+ * when it does: builder-1's signature over the record and the landed commit, each field exactly, and at most 30
+ * minutes old. */
+export function checkBuilt(
+  text: string,
+  input: { commit: string; tree?: string; pub: KeyObject | undefined; now: Date },
+): { refused: string } | { due: string } {
+  const why = refusal(text, input);
+  if (why) return { refused: why };
+  return { due: text.split("\n").find((l) => l.startsWith("due=")) ?? "due=" };
+}
+
+function refusal(
+  text: string,
+  input: { commit: string; tree?: string; pub: KeyObject | undefined; now: Date },
+): string | undefined {
+  const at = text.lastIndexOf(`\n${BUILT_SIGNER}=`);
+  if (at < 0) return `the record carries no ${BUILT_SIGNER} signature`;
+  const record = text.slice(0, at + 1);
+  const sig = text.slice(at + BUILT_SIGNER.length + 2).trim();
+  if (!BASE64.test(sig) || Buffer.from(sig, "base64").length !== 64)
+    return `the record's ${BUILT_SIGNER} signature is not an Ed25519 signature`;
+  if (!input.pub) return `the workflow pins no ${BUILT_SIGNER} key`;
+  const lines = record.slice(0, -1).split("\n");
+  const fields = new Map(lines.map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+  if (lines.length !== BUILT_FIELDS.length || lines.some((l, i) => !l.startsWith(`${BUILT_FIELDS[i]}=`)))
+    return `the record's fields are not ${BUILT_FIELDS.join(", ")}`;
+  const hex = createHash("sha256").update(record).digest("hex");
+  const signed = `${BUILT_SIGNS_AS} v1\ncommit ${input.commit}\nsha256 ${hex}\n`;
+  if (!edVerify(null, Buffer.from(signed), input.pub, Buffer.from(sig, "base64")))
+    return `${BUILT_SIGNER}'s signature does not hold for this record and ${input.commit.slice(0, 9)}`;
+  if (fields.get("target") !== SDKS_TARGET) return `the record is for ${fields.get("target")}, not ${SDKS_TARGET}`;
+  if (fields.get("sha") !== input.commit)
+    return `the record names ${fields.get("sha")?.slice(0, 9)}, not ${input.commit.slice(0, 9)}`;
+  if (fields.get("tree") !== input.tree)
+    return `the record names the tree ${fields.get("tree")?.slice(0, 9)}, not this copy's ${(input.tree ?? "(unread)").slice(0, 9)}`;
+  const when = Date.parse(fields.get("at") ?? "");
+  if (!Number.isFinite(when)) return "the record names no time";
+  const age = input.now.getTime() - when;
+  if (age > RECORD_MAX_AGE_MS) return `the record is ${Math.round(age / 60_000)} minutes old`;
+  if (age < -SKEW_MS) return "the record is dated ahead of this runner's clock";
+  return undefined;
+}
+
+/** The tags the line publishes with: `publish/<commit>`. */
 export const PUBLISH_TAG = "refs/tags/publish/";
 
-/** The commit and record a pushed `publish/<commit>` tag carries, as the
- * dispatch's inputs would, or why it carries none. `tag` is `git cat-file
- * -p` of the tag object (only an annotated tag has a message), `tagged` the
- * commit it names, `head` the commit checked out (the run's), and `onMain`
- * whether `head` is on the mirror's main: a tag elsewhere publishes nothing,
- * as a dispatch runs on main only. The record is then checked by
- * checkDispatch exactly as a dispatch's. */
+/** The commit and record a pushed `publish/<commit>` tag carries, or why it carries none. `tag` is `git cat-file
+ * -p` of the tag object (only an annotated tag has a message), `tagged` the commit it names, `head` the commit
+ * checked out (the run's), and `onMain` whether `head` is on the mirror's main: a tag elsewhere publishes nothing.
+ * The record is then checked by [checkBuilt]. */
 export function fromTag(input: {
   ref: string;
   type: string;
@@ -61,84 +101,14 @@ export function fromTag(input: {
   if (!input.onMain) return { refused: "the tagged commit is not on the mirror's main" };
   const at = input.tag.indexOf("\n\n");
   if (at < 0) return { refused: "the tag carries no message" };
-  const record = Buffer.from(input.tag.slice(at + 2).trim() + "\n").toString("base64");
-  return { commit, record };
+  return { commit, record: input.tag.slice(at + 2).trim() + "\n" };
 }
 
-/** The line the hub's copy commit carries, naming its source. */
+/** The line the line's copy commit carries, naming its source. */
 export const copiedLine = (sha: string) => `Copied from ${sha}`;
 
 /** The one source commit a copy's message names, or undefined. */
 export function copiedFrom(message: string): string | undefined {
   const found = [...message.matchAll(/^Copied from ([0-9a-f]{40})$/gm)];
   return found.length === 1 ? found[0]![1] : undefined;
-}
-
-/** Why this dispatch publishes nothing, or undefined when it may. `record`
- * is base64: a workflow input is one line. */
-export function checkDispatch(input: {
-  commit: string;
-  record: string;
-  message: string;
-  pub: KeyObject | undefined;
-  /** vin-1's own SDK key (RELEASE_SIGN_PUB_VIN1), for its records alone. */
-  vin1Pub?: KeyObject | undefined;
-  /** CI/CD's SDK stage on next (engines/land/crates/sdks, runtime-land-sdks;
-   * RELEASE_SIGN_PUB_STAGE): its records name CI/CD's pass and the copy's
-   * own tree, as vin-1's do. */
-  stagePub?: KeyObject | undefined;
-  /** The tree of the mirror commit checked out, which every job publishes
-   * from (`git rev-parse HEAD^{tree}`). vin-1 signs the tree it read back
-   * with its own git from the copy it pushed, so its record publishes only
-   * that exact tree. */
-  tree?: string;
-  now: Date;
-  verify: typeof Verify;
-}): string | undefined {
-  if (!FULL_SHA.test(input.commit)) return "the commit input is not a full sha";
-  // The inputs are anyone's who can start a workflow: read only as data,
-  // and only in the shape the hub sends.
-  if (input.record.length > RECORD_MAX_INPUT || !BASE64.test(input.record))
-    return `the record input is not base64 under ${RECORD_MAX_INPUT} characters`;
-  const copied = copiedFrom(input.message);
-  if (!copied)
-    return "this mirror commit names no single source (no Copied from line): the hub did not make it";
-  if (copied !== input.commit)
-    return `this mirror commit is a copy of ${copied.slice(0, 9)}, not ${input.commit.slice(0, 9)}`;
-  const text = Buffer.from(input.record, "base64").toString("utf8");
-  // verify() takes exactly the record's fields, in order, and refuses a
-  // line more or less; the action and target are asked for exactly: a
-  // record the signer gave for anything else (a host, controller, settings
-  // or follower release, a lifted hold) publishes nothing.
-  // Each key is asked only for the check it signs for: the hub's for its
-  // full check, vin-1's for CI/CD's pass. A record either signed that names
-  // the other's check publishes nothing.
-  const want = {
-    action: "release" as const,
-    target: SDKS_TARGET,
-    sha: input.commit,
-    hosts: SDKS_HOSTS,
-  };
-  const keys = [
-    { pub: input.pub, check: SDKS_CHECK },
-    ...(input.vin1Pub ? [{ pub: input.vin1Pub, check: SDKS_CHECK_VIN1 }] : []),
-    ...(input.stagePub ? [{ pub: input.stagePub, check: SDKS_CHECK_VIN1 }] : []),
-  ];
-  let why = "no key to check the record with";
-  for (const key of keys) {
-    const verdict = input.verify(text, key.pub, want, input.now, { maxAgeMs: RECORD_MAX_AGE_MS });
-    if (!verdict.ok) {
-      // The hub's answer is the one told when no key signed it.
-      if (key === keys[0]) why = verdict.why;
-      continue;
-    }
-    if (verdict.signed.check !== key.check)
-      return `the record names ${verdict.signed.check}, not ${key.check}`;
-    // vin-1's record names the mirror copy's own tree: a copy other than the
-    // one it checked and pushed publishes nothing.
-    if (key.check === SDKS_CHECK_VIN1 && verdict.signed.tree !== input.tree)
-      return `the record names the tree ${verdict.signed.tree.slice(0, 9)}, not this copy's ${(input.tree ?? "(unread)").slice(0, 9)}`;
-    return undefined;
-  }
-  return why;
 }
