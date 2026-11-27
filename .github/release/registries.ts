@@ -1,56 +1,22 @@
 // What each registry already has, and whether a version may go to it (Marc,
-// 14 October 2026: agents publish the SDKs by themselves). The hub asks this
-// before it starts a release (agents/sdks.ts), and each job of the publish
-// workflow asks it again just before its upload (cli.ts decide). A version
+// 14 October 2026: agents publish the SDKs by themselves). The line reads it to
+// pick each version (cli.ts next), and each job of the publish workflow asks it
+// again just before its upload (cli.ts decide). A version
 // the registry has is skipped: none takes one twice, and a rerun finishes
 // what a run left. A version at or below the registry's newest is refused:
 // npm would move `latest` backwards, and the others would list a release
 // older than one customers already have. Node runs this file in the public
 // mirror with its types stripped: it imports nothing.
 
-export type Target =
-  | "npm"
-  | "mcp"
-  | "pypi"
-  | "langchain"
-  | "openai-agents"
-  | "pydantic-ai"
-  | "google-adk"
-  | "smolagents"
-  | "maven"
-  | "rubygems"
-  | "go";
-/** control-fleet's checks/sdks.rs `TARGETS` names the same, in this order
- * (registries.test.ts holds them together). */
-export const TARGETS: readonly Target[] = [
-  "npm",
-  "mcp",
-  "pypi",
-  "langchain",
-  "openai-agents",
-  "pydantic-ai",
-  "google-adk",
-  "smolagents",
-  "maven",
-  "rubygems",
-  "go",
-];
+export type Target = "npm" | "mcp" | "pypi" | "maven" | "rubygems" | "go";
+/** Every job of the publish workflow, and Go's tag (versions.ts SDKS names each package's). */
+export const TARGETS: readonly Target[] = ["npm", "mcp", "pypi", "maven", "rubygems", "go"];
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export type Registry = {
-  /** The package whose version files name the version (versions.ts). */
-  pkg:
-    | "js"
-    | "python"
-    | "langchain"
-    | "openai-agents"
-    | "pydantic-ai"
-    | "google-adk"
-    | "smolagents"
-    | "go"
-    | "java"
-    | "ruby";
+  /** The SDK it publishes (versions.ts SDKS). */
+  pkg: "js" | "python" | "ruby" | "go" | "java";
   /** In plain words, for Slack and the logs. */
   label: string;
   /** Every version it lists, or why it could not be read; a package it has
@@ -109,6 +75,26 @@ function reader(url: string, as: "json" | "text", parse: (body: any) => unknown)
   };
 }
 
+/** Every version the Go proxy lists, of every major: by Go's rule a major of 2 or more is its own module path,
+ * withruntime.com/go/v<major>, so each is read until one lists none of its own major. */
+async function goVersions(fetcher: Fetch): Promise<string[] | { unread: string }> {
+  const all: string[] = [];
+  for (let major = 1; major < 100; major++) {
+    const path = major === 1 ? "withruntime.com/go" : `withruntime.com/go/v${major}`;
+    const list = await reader(`https://proxy.golang.org/${path}/@v/list`, "text", (b) =>
+      String(b)
+        .split("\n")
+        .map((v) => v.trim().replace(/^v/, ""))
+        .filter(Boolean),
+    )(fetcher);
+    if (!Array.isArray(list)) return list;
+    const own = list.filter((v) => (major === 1 ? Number(v.split(".")[0]) <= 1 : Number(v.split(".")[0]) === major));
+    if (major > 1 && own.length === 0) break;
+    all.push(...own);
+  }
+  return all;
+}
+
 const MCP_NAME = "com.withruntime/runtime";
 
 /** Every version the MCP registry lists for the server, page by page. */
@@ -160,11 +146,6 @@ export const REGISTRIES: Record<Target, Registry> = {
   },
   mcp: { pkg: "js", label: "the MCP registry (com.withruntime/runtime)", read: mcpVersions },
   pypi: pypi("python", "withruntime"),
-  langchain: pypi("langchain", "langchain-withruntime"),
-  "openai-agents": pypi("openai-agents", "openai-agents-withruntime"),
-  "pydantic-ai": pypi("pydantic-ai", "pydantic-ai-withruntime"),
-  "google-adk": pypi("google-adk", "google-adk-withruntime"),
-  smolagents: pypi("smolagents", "smolagents-withruntime"),
   maven: {
     pkg: "java",
     label: "Maven Central com.withruntime:withruntime",
@@ -184,12 +165,7 @@ export const REGISTRIES: Record<Target, Registry> = {
   go: {
     pkg: "go",
     label: "Go withruntime.com/go",
-    read: reader("https://proxy.golang.org/withruntime.com/go/@v/list", "text", (b) =>
-      String(b)
-        .split("\n")
-        .map((v) => v.trim().replace(/^v/, ""))
-        .filter(Boolean),
-    ),
+    read: goVersions,
   },
 };
 
@@ -229,69 +205,4 @@ export function decide(
       refused: `${version} is not newer than ${newest}, the newest ${label} has: bump the version past it`,
     };
   return { do: "publish" };
-}
-
-/** Whether a registry is a PyPI project. */
-export const onPypi = (t: Target) => REGISTRIES[t].label.startsWith("PyPI ");
-
-/** Every PyPI project publishes from the environment `release` (main and
- * publish/* tags only), and PyPI holds one pending publisher (a project
- * before its first upload) per repository, workflow and environment. So of
- * the PyPI projects with no upload yet only the first in TARGETS goes; each
- * after it waits, its pending publisher added once the one before has
- * uploaded (the RUNBOOK's "Publish the SDKs"). The label of the project it
- * waits for, or undefined. */
-export function waitsForFirstUpload(
-  target: Target,
-  listed: (t: Target) => readonly string[],
-): string | undefined {
-  if (!onPypi(target) || listed(target).length) return undefined;
-  const ahead = TARGETS.slice(0, TARGETS.indexOf(target)).find(
-    (t) => onPypi(t) && !listed(t).length,
-  );
-  return ahead && REGISTRIES[ahead].label;
-}
-
-/** The registry each client the API names (packages/cloud/src/api/client-version.ts)
- * installs from. */
-export const CLIENT_TARGETS: Record<string, Target> = {
-  "sdk-js": "npm",
-  "mcp-bridge": "npm",
-  "sdk-python": "pypi",
-  "sdk-go": "go",
-  "sdk-java": "maven",
-  "sdk-ruby": "rubygems",
-};
-
-/** The cutoffs client-version.ts's KNOWS names, read from its text: the hub
- * reads them from the commit it publishes, and loads nothing of the API. */
-export function parseKnows(text: string): Record<string, readonly number[]> {
-  const block = /const KNOWS[^{]*\{([^}]*)\}/.exec(text)?.[1] ?? "";
-  return Object.fromEntries(
-    [...block.matchAll(/"([a-z-]+)": \[(\d+), (\d+), (\d+)\]/g)].map(([, client, ...v]) => [
-      client!,
-      v.map(Number),
-    ]),
-  );
-}
-
-/** Why a registry's customers cannot install a client the API counts as
- * knowing that a stop keeps the disk (`knows`: client-version.ts KNOWS), or
- * undefined. On 15 October 2026 PyPI's newest was 0.11.1 against the API's
- * 0.12.0, so every Python customer's stop deleted the disk three days later,
- * with nothing to install instead. */
-export function behindCutoff(
-  target: Target,
-  knows: Record<string, readonly number[]>,
-  listed: readonly string[],
-): string | undefined {
-  const first = Object.entries(CLIENT_TARGETS)
-    .filter(([client, t]) => t === target && knows[client])
-    .map(([client]) => knows[client]!.join("."))
-    .sort(compare)
-    .at(-1);
-  if (!first) return undefined;
-  const newest = [...listed].sort(compare).at(-1);
-  if (newest && compare(newest, first) >= 0) return undefined;
-  return `${REGISTRIES[target].label} has ${newest ?? "no version"}, below ${first}, the first the API counts as knowing that a stop keeps the disk: its customers' stops delete the disk after three days`;
 }

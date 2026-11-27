@@ -1,0 +1,3 @@
+# The mirror's .github checks every copy and holds the release steps beside the registries' secrets, so only
+# a pull request its owners approve changes it (a release's copy never carries it: export.sh --github).
+/.github/ @runtimeteam
